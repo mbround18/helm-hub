@@ -1,0 +1,57 @@
+[package]
+name = "helm-hub-backend"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "helm-hub"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+axum = { version = "0.8", features = ["multipart", "macros"] }
+axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-gzip"] }
+tokio = { version = "1", features = ["full"] }
+
+# Database
+diesel = { version = "2.2", features = ["sqlite", "r2d2", "chrono", "uuid"] }
+diesel_migrations = { version = "2.2", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+r2d2 = "0.8"
+
+# Auth
+argon2 = "0.5"
+jsonwebtoken = "9"
+totp-rs = { version = "5", features = ["qr"] }
+rand = "0.8"
+base32 = "0.4"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Helm / archive
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.10"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Config / env
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+axum-test = "17"

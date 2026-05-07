@@ -1,0 +1,27 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: /data/helm-hub.db
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      CHARTS_STORAGE_PATH: /data/charts
+      HOST: 0.0.0.0
+      PORT: 3000
+    volumes:
+      - helm_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/charts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  helm_data:
