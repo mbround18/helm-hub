@@ -23,6 +23,10 @@ pub enum AppError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    /// Returned when ClamAV detects a virus in an uploaded file.
+    #[error("Security violation: {0}")]
+    InfectedFile(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 
@@ -44,6 +48,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden(m) => (StatusCode::FORBIDDEN, m.clone()),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
+            AppError::InfectedFile(m) => (StatusCode::FORBIDDEN, m.clone()),
             AppError::Diesel(diesel::result::Error::NotFound) => {
                 (StatusCode::NOT_FOUND, "Record not found".into())
             }

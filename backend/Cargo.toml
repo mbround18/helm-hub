@@ -44,6 +44,9 @@ tar = "0.4"
 flate2 = "1"
 sha2 = "0.10"
 
+# Security scanning
+tempfile = "3"
+
 # Error handling
 thiserror = "2"
 anyhow = "1"

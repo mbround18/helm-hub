@@ -8,13 +8,17 @@ use axum::{
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path as FsPath;
+use uuid::Uuid;
 
 use crate::{
     auth::jwt::Claims,
     db::models::{Chart, ChartVersion, NewChart, NewChartVersion},
     error::AppError,
     schema::{chart_versions, charts},
-    services::chart_extractor::{extract_chart_metadata, parse_chart_yaml, persist_chart},
+    services::{
+        chart_extractor::{extract_chart_metadata, parse_chart_yaml, persist_chart},
+        clamav::{scan_file, ScanOutcome},
+    },
     AppState,
 };
 
@@ -22,8 +26,13 @@ use crate::{
 
 /// `POST /api/charts/:owner`
 ///
-/// Accepts a multipart field named `chart` containing a `.tgz` Helm package.
-/// Authenticated user must match `:owner`.
+/// Full upload flow:
+///   1. Collect multipart bytes
+///   2. Write to a unique temp file (so clamd can stream it off-disk)
+///   3. ClamAV INSTREAM scan — infected → 403, clean → proceed
+///   4. Extract Chart.yaml / values.yaml metadata
+///   5. Persist to permanent storage and index in the database
+///   6. Temp file is always cleaned up, even on error
 pub async fn upload_chart(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -34,31 +43,105 @@ pub async fn upload_chart(
         return Err(AppError::Forbidden("Cannot upload to another user's namespace".into()));
     }
 
-    // Collect the uploaded bytes
+    // ── 1. Collect multipart bytes ────────────────────────────────────────────
     let mut chart_bytes: Option<Bytes> = None;
-    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(e.to_string()))? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
         if field.name() == Some("chart") {
-            chart_bytes = Some(field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?);
+            chart_bytes = Some(
+                field
+                    .bytes()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?,
+            );
             break;
         }
     }
+    let bytes =
+        chart_bytes.ok_or_else(|| AppError::BadRequest("No `chart` field in multipart body".into()))?;
 
-    let bytes = chart_bytes.ok_or_else(|| AppError::BadRequest("No `chart` field in multipart body".into()))?;
+    // ── 2. Write to a temporary file for scanning ─────────────────────────────
+    //
+    // A unique filename avoids races if multiple uploads arrive concurrently.
+    let temp_path = FsPath::new(&state.config.temp_upload_dir)
+        .join(format!("helm-upload-{}.tgz", Uuid::new_v4()));
 
-    // Extract metadata from the archive
-    let extracted = extract_chart_metadata(&bytes)
+    tokio::fs::create_dir_all(&state.config.temp_upload_dir).await?;
+    tokio::fs::write(&temp_path, &bytes).await?;
+
+    // Wrap the rest in an async block so we can reliably remove the temp file
+    // regardless of which branch we take.
+    let result = run_security_gate_and_persist(
+        &state,
+        &claims,
+        &owner,
+        &bytes,
+        &temp_path,
+    )
+    .await;
+
+    // ── Always clean up the temp file ─────────────────────────────────────────
+    if let Err(e) = tokio::fs::remove_file(&temp_path).await {
+        // Non-fatal: log but don't mask the actual result
+        tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove temp upload file");
+    }
+
+    result
+}
+
+/// Inner async function that can be `?`-propagated cleanly while still
+/// guaranteeing the caller cleans up the temp file.
+async fn run_security_gate_and_persist(
+    state: &crate::AppState,
+    claims: &Claims,
+    owner: &str,
+    bytes: &Bytes,
+    temp_path: &std::path::Path,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    // ── 3. ClamAV virus scan ──────────────────────────────────────────────────
+    if state.config.clamav_enabled {
+        tracing::debug!(path = %temp_path.display(), "Running ClamAV scan");
+
+        match scan_file(&state.config.clamd_socket, temp_path).await? {
+            ScanOutcome::Clean => {
+                tracing::info!(owner, "Chart scan passed — proceeding with upload");
+            }
+            ScanOutcome::Infected(virus) => {
+                tracing::warn!(
+                    owner,
+                    virus_name = %virus,
+                    "Infected chart upload blocked"
+                );
+                return Err(AppError::InfectedFile(format!(
+                    "Upload rejected: virus/malware detected ({virus})"
+                )));
+            }
+        }
+    } else {
+        tracing::warn!("CLAMAV_ENABLED=false — skipping virus scan (not for production)");
+    }
+
+    // ── 4. Extract Chart.yaml / values.yaml ──────────────────────────────────
+    let extracted = extract_chart_metadata(bytes)
         .map_err(|e| AppError::BadRequest(format!("Invalid Helm chart archive: {e}")))?;
 
     let (chart_name, version, app_version, description) =
-        parse_chart_yaml(&extracted.chart_yaml)
-            .ok_or_else(|| AppError::BadRequest("Chart.yaml missing required fields (name, version)".into()))?;
+        parse_chart_yaml(&extracted.chart_yaml).ok_or_else(|| {
+            AppError::BadRequest(
+                "Chart.yaml missing required fields (name, version)".into(),
+            )
+        })?;
 
+    // ── 5. Persist to permanent storage ───────────────────────────────────────
     let storage_root = FsPath::new(&state.config.charts_storage_path);
-    let storage_path = persist_chart(storage_root, &owner, &chart_name, &version, &bytes)?;
+    let storage_path = persist_chart(storage_root, owner, &chart_name, &version, bytes)?;
 
     let mut conn = state.db.get()?;
 
-    // Upsert the parent Chart record
+    // Upsert the parent Chart row
     let chart: Chart = match charts::table
         .filter(charts::owner_id.eq(&claims.sub))
         .filter(charts::name.eq(&chart_name))
@@ -68,7 +151,8 @@ pub async fn upload_chart(
     {
         Some(c) => c,
         None => {
-            let new_chart = NewChart::new(claims.sub.clone(), chart_name.clone(), description.clone());
+            let new_chart =
+                NewChart::new(claims.sub.clone(), chart_name.clone(), description.clone());
             diesel::insert_into(charts::table)
                 .values(&new_chart)
                 .execute(&mut conn)?;
@@ -79,8 +163,8 @@ pub async fn upload_chart(
         }
     };
 
-    // Check for duplicate version
-    let exists: bool = chart_versions::table
+    // Guard against duplicate version
+    let exists = chart_versions::table
         .filter(chart_versions::chart_id.eq(&chart.id))
         .filter(chart_versions::version.eq(&version))
         .count()
@@ -93,6 +177,7 @@ pub async fn upload_chart(
         )));
     }
 
+    // ── 6. Index in database ──────────────────────────────────────────────────
     let new_version = NewChartVersion::new(
         chart.id.clone(),
         version.clone(),

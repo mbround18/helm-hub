@@ -1,27 +1,29 @@
 services:
-  backend:
-    build: ./backend
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
     environment:
       DATABASE_URL: /data/helm-hub.db
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or environment}
       CHARTS_STORAGE_PATH: /data/charts
+      TEMP_UPLOAD_DIR: /tmp/helm-uploads
+      CLAMD_SOCKET: /var/run/clamav/clamd.ctl
+      CLAMAV_ENABLED: "true"
       HOST: 0.0.0.0
       PORT: 3000
+      RUST_LOG: helm_hub_backend=info,tower_http=info
     volumes:
       - helm_data:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/charts"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/charts || exit 1"]
+      interval: 15s
       timeout: 5s
+      start_period: 90s   # allow time for freshclam + clamd startup
       retries: 5
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "8080:80"
-    depends_on:
-      backend:
-        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   helm_data:

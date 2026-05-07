@@ -8,6 +8,12 @@ pub struct Config {
     pub charts_storage_path: String,
     pub host: String,
     pub port: u16,
+    /// Path to the clamd Unix socket.
+    pub clamd_socket: String,
+    /// When false the scan step is skipped entirely (useful in dev without ClamAV).
+    pub clamav_enabled: bool,
+    /// Directory for temporary upload files awaiting virus scan.
+    pub temp_upload_dir: String,
 }
 
 impl Config {
@@ -26,6 +32,13 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3000),
+            clamd_socket: env::var("CLAMD_SOCKET")
+                .unwrap_or_else(|_| "/var/run/clamav/clamd.ctl".into()),
+            clamav_enabled: env::var("CLAMAV_ENABLED")
+                .map(|v| v.to_lowercase() == "true" || v == "1")
+                .unwrap_or(true),
+            temp_upload_dir: env::var("TEMP_UPLOAD_DIR")
+                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         }
     }
 }
