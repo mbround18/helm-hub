@@ -2,7 +2,7 @@
 # Stage 1 — Frontend build
 #   Node 20 Alpine: install dependencies, run Vite production build.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 RUN npm install -g pnpm@10
 
@@ -23,7 +23,7 @@ RUN pnpm build
 #   Compute a recipe.json that captures only the dependency fingerprint.
 #   This layer is invalidated only when Cargo.toml / Cargo.lock change.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.82-slim-bookworm AS rust-planner
+FROM rust:1.95-slim-bookworm AS rust-planner
 
 RUN cargo install cargo-chef --locked
 
@@ -37,7 +37,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 #   Builds and caches all transitive dependencies using the recipe.
 #   libsqlite3-sys uses the "bundled" feature so no host sqlite3-dev needed.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.82-slim-bookworm AS rust-cacher
+FROM rust:1.95-slim-bookworm AS rust-cacher
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -54,7 +54,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 # Stage 2c — Rust application build
 #   Only this layer is rebuilt when application source changes.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.82-slim-bookworm AS backend-builder
+FROM rust:1.95-slim-bookworm AS backend-builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
