@@ -20,19 +20,7 @@ pub struct Chart {
     pub is_private: i32,
     pub created_at: String,
     pub updated_at: String,
-}
-
-impl Chart {
-    pub fn keywords_list(&self) -> Vec<String> {
-        self.keywords
-            .as_deref()
-            .and_then(|k| serde_json::from_str(k).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn is_private(&self) -> bool {
-        self.is_private != 0
-    }
+    pub download_count: i32,
 }
 
 #[derive(Debug, Insertable, Deserialize)]
@@ -68,26 +56,3 @@ impl NewChart {
     }
 }
 
-#[derive(Debug, AsChangeset)]
-#[diesel(table_name = charts)]
-pub struct UpdateChart {
-    pub description: Option<Option<String>>,
-    pub home_url: Option<Option<String>>,
-    pub icon_url: Option<Option<String>>,
-    pub keywords: Option<Option<String>>,
-    pub is_private: Option<i32>,
-    pub updated_at: String,
-}
-
-impl Default for UpdateChart {
-    fn default() -> Self {
-        Self {
-            description: None,
-            home_url: None,
-            icon_url: None,
-            keywords: None,
-            is_private: None,
-            updated_at: Utc::now().to_rfc3339(),
-        }
-    }
-}

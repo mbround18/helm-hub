@@ -1,18 +1,15 @@
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    /// Subject = user UUID
     pub sub: String,
     pub username: String,
     pub is_admin: bool,
-    /// Issued-at (Unix timestamp)
     pub iat: i64,
-    /// Expiry (Unix timestamp)
     pub exp: i64,
 }
 
@@ -31,7 +28,7 @@ impl Claims {
 
 pub fn encode_jwt(claims: &Claims, secret: &str) -> Result<String, AppError> {
     encode(
-        &Header::default(),
+        &Header::new(Algorithm::HS256),
         claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
@@ -39,11 +36,10 @@ pub fn encode_jwt(claims: &Claims, secret: &str) -> Result<String, AppError> {
 }
 
 pub fn decode_jwt(token: &str, secret: &str) -> Result<Claims, AppError> {
-    decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
-    )
-    .map(|data| data.claims)
-    .map_err(|e| AppError::Unauthorized(e.to_string()))
+    // Explicitly pin to HS256 — rejects "none" and any other algorithm.
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.leeway = 0;
+    decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
+        .map(|data| data.claims)
+        .map_err(|e| AppError::Unauthorized(e.to_string()))
 }

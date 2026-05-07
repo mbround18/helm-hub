@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../lib/api'
-import { useAuthStore } from '../stores/auth'
 import { Package, AlertCircle } from 'lucide-react'
 
 export function Register() {

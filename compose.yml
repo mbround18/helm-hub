@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: /data/helm-hub.db
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or environment}
@@ -18,10 +20,10 @@ services:
     volumes:
       - helm_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/charts || exit 1"]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:3000/api/charts || exit 1" ]
       interval: 15s
       timeout: 5s
-      start_period: 90s   # allow time for freshclam + clamd startup
+      start_period: 90s # allow time for freshclam + clamd startup
       retries: 5
     restart: unless-stopped
 

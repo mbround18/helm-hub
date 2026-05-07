@@ -4,7 +4,10 @@
 ///   Client → `zINSTREAM\0`
 ///   Client → [4-byte big-endian chunk length][chunk bytes] … (repeat)
 ///   Client → [4 zero bytes]   ← signals end of stream
-///   Server → `stream: OK\n`  |  `stream: {VirusName} FOUND\n`  |  `… ERROR\n`
+///   Server → `stream: OK\0`  |  `stream: {VirusName} FOUND\0`  |  `… ERROR\0`
+///
+/// The `z`-prefixed command variant uses NUL terminators (not newlines) for
+/// both the command and the response, so we strip `\0` as well as whitespace.
 use std::path::Path;
 
 use tokio::{
@@ -78,6 +81,7 @@ pub async fn scan_file(socket_path: &str, file_path: &Path) -> Result<ScanOutcom
 ///   `stream: Access denied. ERROR`
 ///   `INSTREAM size limit exceeded. ERROR`
 fn parse_response(response: &str) -> Result<ScanOutcome, AppError> {
+    let response = response.trim_matches('\0');
     if response.ends_with(" FOUND") {
         // Strip "stream: " prefix and " FOUND" suffix to isolate the virus name
         let virus = response
@@ -125,5 +129,19 @@ mod tests {
             result,
             ScanOutcome::Infected("Win.Trojan.Agent-12345".into())
         );
+    }
+
+    // The `z`-prefixed command variant returns NUL-terminated responses.
+    // scan_file strips \0 before calling parse_response; these tests guard
+    // against the stripping being accidentally removed.
+    #[test]
+    fn parse_clean_nul_terminated() {
+        assert_eq!(parse_response("stream: OK\0").unwrap(), ScanOutcome::Clean);
+    }
+
+    #[test]
+    fn parse_infected_nul_terminated() {
+        let result = parse_response("stream: Eicar-Test-Signature FOUND\0").unwrap();
+        assert_eq!(result, ScanOutcome::Infected("Eicar-Test-Signature".into()));
     }
 }

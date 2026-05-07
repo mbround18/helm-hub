@@ -10,12 +10,15 @@ WORKDIR /app
 
 # Restore dependencies in a separate layer so they are cached unless
 # package.json / lockfile change.
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./frontend/
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY frontend/ .
-RUN pnpm build
-# Output: /app/dist
+COPY frontend/ ./frontend/
+
+
+RUN pnpm -r build
+# Output: /app/frontend/dist
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -37,7 +40,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 #   Builds and caches all transitive dependencies using the recipe.
 #   libsqlite3-sys uses the "bundled" feature so no host sqlite3-dev needed.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.95-slim-bookworm AS rust-cacher
+FROM rust:1.95 AS rust-cacher
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -54,7 +57,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 # Stage 2c — Rust application build
 #   Only this layer is rebuilt when application source changes.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.95-slim-bookworm AS backend-builder
+FROM rust:1.95 AS backend-builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -76,7 +79,7 @@ RUN cargo build --release --bin helm-hub
 #   Debian Bookworm slim + ClamAV daemon + freshclam + tini.
 #   The bundled SQLite in the Rust binary requires only glibc (already present).
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie AS runtime
 
 # ── System packages ───────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
@@ -104,16 +107,17 @@ RUN sed -i \
     -e 's|^LocalSocketGroup .*|LocalSocketGroup clamav|' \
     # Disable remote TCP socket — Unix socket only
     -e 's|^#TCPSocket|#TCPSocket|' \
-    # Log to stdout so Docker captures it
-    -e 's|^LogFile .*|LogFile /dev/stdout|' \
+    # Let clamd log to the foreground process stream; explicit log files
+    # against /dev/stdout or /proc/self/fd/1 fail in this container.
+    -e '/^#\?LogFile /d' \
     -e 's|^#LogVerbose.*|LogVerbose yes|' \
     # Do not detach (we manage the process directly)
     -e 's|^Foreground .*|Foreground yes|' \
     /etc/clamav/clamd.conf || true
 
-# freshclam.conf: also log to stdout
+# freshclam.conf: remove file logging and let the CLI write to stdout
 RUN sed -i \
-    -e 's|^UpdateLogFile .*|UpdateLogFile /dev/stdout|' \
+    -e '/^#\?UpdateLogFile /d' \
     -e 's|^Foreground .*|Foreground yes|' \
     /etc/clamav/freshclam.conf || true
 
@@ -134,7 +138,7 @@ RUN mkdir -p \
 
 # ── Copy artefacts ────────────────────────────────────────────────────────────
 COPY --from=backend-builder /app/target/release/helm-hub /app/helm-hub
-COPY --from=frontend-builder /app/dist /app/static
+COPY --from=frontend-builder /app/frontend/dist /app/static
 
 # ── Entrypoint script ─────────────────────────────────────────────────────────
 COPY entrypoint.sh /app/entrypoint.sh

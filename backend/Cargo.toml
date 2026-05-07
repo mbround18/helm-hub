@@ -9,52 +9,91 @@ path = "src/main.rs"
 
 [dependencies]
 # Web framework
-axum = { version = "0.8", features = ["multipart", "macros"] }
-axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-gzip"] }
-tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8.9", features = ["multipart", "macros"] }
+axum-extra = { version = "0.12.6", features = ["cookie", "typed-header"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.6.10", features = [
+  "cors",
+  "fs",
+  "trace",
+  "compression-gzip",
+] }
+tokio = { version = "1.52.2", features = ["full"] }
 
 # Database
-diesel = { version = "2.2", features = ["sqlite", "r2d2", "chrono", "uuid"] }
-diesel_migrations = { version = "2.2", features = ["sqlite"] }
-libsqlite3-sys = { version = "0.30", features = ["bundled"] }
-r2d2 = "0.8"
+diesel = { version = "2.3.9", features = ["sqlite", "r2d2", "chrono", "uuid"] }
+diesel_migrations = { version = "2.3.2", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.37.0", features = ["bundled"] }
+r2d2 = "0.8.10"
 
 # Auth
-argon2 = "0.5"
-jsonwebtoken = "9"
-totp-rs = { version = "5", features = ["qr"] }
-rand = "0.8"
-base32 = "0.4"
+argon2 = "0.5.3"
+rand_core = { version = "0.6", features = ["getrandom"] }
+jsonwebtoken = { version = "10.3.0", default-features = false, features = [
+  "rust_crypto",
+] }
+totp-rs = { version = "5.7.1", features = ["qr"] }
+rand = "0.10.1"
+base32 = "0.5.1"
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+yaml_serde = "0.10"
+
+# Cryptography — at-rest token encryption
+aes-gcm = "0.10"
+hex = "0.4"
 
 # IDs
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
 
 # Time
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.44", features = ["serde"] }
 
 # Helm / archive
-tar = "0.4"
-flate2 = "1"
-sha2 = "0.10"
+tar = "0.4.45"
+flate2 = "1.1.9"
+sha2 = "0.11.0"
 
 # Security scanning
-tempfile = "3"
+tempfile = "3.27.0"
+
+# HTTP client — GitHub API calls
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
 
 # Error handling
-thiserror = "2"
-anyhow = "1"
+thiserror = "2.0.18"
+anyhow = "1.0.102"
 
 # Config / env
-dotenvy = "0.15"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15.7"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = [
+  "env-filter",
+  "registry",
+] }
+
+# Metrics — Prometheus scrape endpoint
+metrics = "0.24.5"
+metrics-exporter-prometheus = "0.18.3"
+
+# OpenTelemetry — optional OTLP export (activated when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+opentelemetry = { version = "0.31.0", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.31.0", features = [
+  "rt-tokio",
+  "trace",
+  "metrics",
+] }
+opentelemetry-otlp = { version = "0.31.1", features = [
+  "grpc-tonic",
+  "trace",
+  "metrics",
+] }
+tracing-opentelemetry = "0.32.1"
 
 [dev-dependencies]
-axum-test = "17"
+axum-test = "20.0.0"

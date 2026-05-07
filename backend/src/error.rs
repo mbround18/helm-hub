@@ -27,6 +27,12 @@ pub enum AppError {
     #[error("Security violation: {0}")]
     InfectedFile(String),
 
+    #[error("Rate limit exceeded: {0}")]
+    TooManyRequests(String),
+
+    #[error("Storage quota exceeded")]
+    QuotaExceeded,
+
     #[error("Internal error: {0}")]
     Internal(String),
 
@@ -49,6 +55,11 @@ impl IntoResponse for AppError {
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             AppError::InfectedFile(m) => (StatusCode::FORBIDDEN, m.clone()),
+            AppError::TooManyRequests(m) => (StatusCode::TOO_MANY_REQUESTS, m.clone()),
+            AppError::QuotaExceeded => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Storage quota exceeded".into(),
+            ),
             AppError::Diesel(diesel::result::Error::NotFound) => {
                 (StatusCode::NOT_FOUND, "Record not found".into())
             }

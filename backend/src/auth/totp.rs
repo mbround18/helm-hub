@@ -1,5 +1,5 @@
 use base32::{encode, Alphabet};
-use rand::RngCore;
+use rand_core::{OsRng, RngCore};
 use totp_rs::{Algorithm, Secret, TOTP};
 
 use crate::error::AppError;
@@ -7,8 +7,8 @@ use crate::error::AppError;
 /// Generate a new random base-32 TOTP secret.
 pub fn generate_secret() -> String {
     let mut bytes = [0u8; 20]; // 160-bit secret
-    rand::thread_rng().fill_bytes(&mut bytes);
-    encode(Alphabet::RFC4648 { padding: false }, &bytes)
+    OsRng.fill_bytes(&mut bytes);
+    encode(Alphabet::Rfc4648 { padding: false }, &bytes)
 }
 
 /// Build the `otpauth://` provisioning URI shown in QR codes.

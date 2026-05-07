@@ -14,6 +14,39 @@ api.interceptors.request.use((config) => {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// ── API Token types ───────────────────────────────────────────────────────────
+
+export type TokenTtlDays = 30 | 60 | 90 | 180 | 365
+
+export interface ApiToken {
+  id: string
+  user_id: string
+  description: string
+  expires_at: string
+  last_used_at: string | null
+  created_at: string
+}
+
+export interface CreatedToken extends ApiToken {
+  /** Raw token value — returned exactly once at creation time. */
+  token: string
+}
+
+export interface UploadedChart {
+  chart: string
+  version: string
+  owner: string
+}
+
+export interface FailedChart {
+  error: string
+}
+
+export interface UploadResult {
+  uploaded: UploadedChart[]
+  failed: FailedChart[]
+}
+
 export interface User {
   id: string
   username: string
@@ -35,6 +68,12 @@ export interface Chart {
   is_private: number
   created_at: string
   updated_at: string
+  download_count: number
+}
+
+/** Returned by GET /api/charts — includes owner_username for install URLs. */
+export interface PublicChart extends Chart {
+  owner_username: string
 }
 
 export interface ChartVersion {
@@ -70,7 +109,7 @@ export const authApi = {
 
 export const chartsApi = {
   list: (params?: { q?: string; page?: number; per_page?: number }) =>
-    api.get<Chart[]>('/charts', { params }),
+    api.get<PublicChart[]>('/charts', { params }),
 
   listByOwner: (owner: string) =>
     api.get<Chart[]>(`/charts/${owner}`),
@@ -78,10 +117,11 @@ export const chartsApi = {
   listVersions: (owner: string, chartName: string) =>
     api.get<ChartVersion[]>(`/charts/${owner}/${chartName}`),
 
-  upload: (owner: string, file: File) => {
+  upload: (owner: string, files: File | File[]) => {
     const form = new FormData()
-    form.append('chart', file)
-    return api.post<{ message: string; chart: string; version: string }>(`/charts/${owner}`, form, {
+    const list = Array.isArray(files) ? files : [files]
+    for (const f of list) form.append('chart', f)
+    return api.post<UploadResult>(`/charts/${owner}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
@@ -89,6 +129,74 @@ export const chartsApi = {
   deleteVersion: (owner: string, chartName: string, version: string) =>
     api.delete(`/charts/${owner}/${chartName}/${version}`),
 
+  purgeChart: (owner: string, chartName: string) =>
+    api.delete(`/charts/${owner}/${chartName}`),
+
   downloadUrl: (owner: string, chartName: string, version: string) =>
     `/api/charts/${owner}/${chartName}/${version}/download`,
+}
+
+// ── GitHub ────────────────────────────────────────────────────────────────────
+
+export interface GithubConnection {
+  id: string
+  user_id: string
+  github_id: string
+  github_username: string
+  avatar_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface GithubRepo {
+  id: string
+  user_id: string
+  github_connection_id: string
+  repo_owner: string
+  repo_name: string
+  last_synced_at: string | null
+  created_at: string
+}
+
+export interface ChartSyncEntry {
+  chart: string
+  version: string
+  status: 'imported' | 'skipped' | 'failed'
+  message?: string
+}
+
+export interface SyncReport {
+  repo: string
+  entries: ChartSyncEntry[]
+  synced_at: string
+}
+
+export const githubApi = {
+  /** Returns the GitHub OAuth authorization URL. Must be logged in. */
+  oauthUrl: (returnTo: string) =>
+    api.get<{ url: string }>(`/auth/github/url?return_to=${encodeURIComponent(returnTo)}`),
+
+  getConnection: () =>
+    api.get<{ connection: GithubConnection | null }>('/github/connection'),
+
+  deleteConnection: () => api.delete('/github/connection'),
+
+  listRepos: () => api.get<GithubRepo[]>('/github/repos'),
+
+  addRepo: (repo: string) => api.post<GithubRepo>('/github/repos', { repo }),
+
+  removeRepo: (id: string) => api.delete(`/github/repos/${id}`),
+
+  syncRepo: (id: string) => api.post<SyncReport>(`/github/repos/${id}/sync`),
+}
+
+// ── Personal Access Tokens ────────────────────────────────────────────────────
+
+export const tokensApi = {
+  list: () => api.get<ApiToken[]>('/tokens'),
+
+  create: (description: string, ttl_days: TokenTtlDays) =>
+    api.post<CreatedToken>('/tokens', { description, ttl_days }),
+
+  revoke: (id: string) => api.delete(`/tokens/${id}`),
 }

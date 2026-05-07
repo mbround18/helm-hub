@@ -25,12 +25,6 @@ pub struct ChartVersion {
     pub created_at: String,
 }
 
-impl ChartVersion {
-    pub fn is_deprecated(&self) -> bool {
-        self.deprecated != 0
-    }
-}
-
 #[derive(Debug, Insertable, Deserialize)]
 #[diesel(table_name = chart_versions)]
 pub struct NewChartVersion {

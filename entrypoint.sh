@@ -16,11 +16,16 @@ set -euo pipefail
 CLAMD_SOCKET="${CLAMD_SOCKET:-/var/run/clamav/clamd.ctl}"
 SOCKET_TIMEOUT=60   # seconds to wait for clamd to be ready
 
+# Docker volumes replace image-layer ownership metadata, so ensure the runtime
+# paths are writable before dropping privileges.
+mkdir -p /data /data/charts /tmp/helm-uploads
+chown helmhub:helmhub /data /data/charts /tmp/helm-uploads
+
 # ── 1. Update virus definitions ───────────────────────────────────────────────
 echo "[entrypoint] Updating ClamAV signature database via freshclam..."
 # Run as the clamav user; tolerate mirror failures (|| true) so the container
 # still starts when there is no outbound internet access.
-if su -s /bin/sh clamav -c "freshclam --quiet 2>&1" ; then
+if su -s /bin/sh clamav -c "freshclam --stdout --quiet" ; then
     echo "[entrypoint] Virus definitions up to date."
 else
     echo "[entrypoint] WARNING: freshclam update failed — using cached definitions."
@@ -30,7 +35,7 @@ fi
 echo "[entrypoint] Starting clamd daemon..."
 # clamd is configured with Foreground=yes so it doesn't try to daemonise
 # itself; we background it here via the shell.
-su -s /bin/sh clamav -c "clamd" &
+su -s /bin/sh clamav -c "clamd --foreground" &
 CLAMD_PID=$!
 echo "[entrypoint] clamd started (PID ${CLAMD_PID})"
 
