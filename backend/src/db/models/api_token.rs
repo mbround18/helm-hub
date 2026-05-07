@@ -33,7 +33,12 @@ pub struct NewApiToken {
 }
 
 impl NewApiToken {
-    pub fn new(user_id: String, description: String, token_hash: String, expires_at: String) -> Self {
+    pub fn new(
+        user_id: String,
+        description: String,
+        token_hash: String,
+        expires_at: String,
+    ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             user_id,

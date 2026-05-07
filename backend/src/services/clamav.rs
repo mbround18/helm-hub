@@ -99,7 +99,9 @@ fn parse_response(response: &str) -> Result<ScanOutcome, AppError> {
     }
 
     // Any other response is an operational error from clamd itself
-    Err(AppError::Internal(format!("Unexpected clamd response: '{response}'")))
+    Err(AppError::Internal(format!(
+        "Unexpected clamd response: '{response}'"
+    )))
 }
 
 #[cfg(test)]

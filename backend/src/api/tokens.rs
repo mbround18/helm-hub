@@ -41,9 +41,9 @@ pub async fn create_token(
         return Err(AppError::BadRequest("description cannot be empty".into()));
     }
     if !ALLOWED_TTL_DAYS.contains(&req.ttl_days) {
-        return Err(AppError::BadRequest(
-            format!("ttl_days must be one of: {ALLOWED_TTL_DAYS:?}"),
-        ));
+        return Err(AppError::BadRequest(format!(
+            "ttl_days must be one of: {ALLOWED_TTL_DAYS:?}"
+        )));
     }
 
     let raw_token = generate_api_token();

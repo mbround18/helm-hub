@@ -7,7 +7,7 @@
 ///
 /// The returned `TelemetryGuard` must stay alive for the whole process.
 /// Dropping it flushes pending spans/metrics and shuts both providers down.
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub struct TelemetryGuard {
     tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
@@ -32,8 +32,8 @@ impl Drop for TelemetryGuard {
 /// Initialise the global tracing subscriber.  Call once before any `tracing`
 /// macros are used.  Keep the returned guard alive until the process exits.
 pub fn init(service_name: &'static str) -> TelemetryGuard {
-    let filter = EnvFilter::from_default_env()
-        .add_directive("helm_hub_backend=debug".parse().unwrap());
+    let filter =
+        EnvFilter::from_default_env().add_directive("helm_hub_backend=debug".parse().unwrap());
 
     match std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
         Ok(endpoint) => init_with_otel(service_name, endpoint, filter),
@@ -42,7 +42,10 @@ pub fn init(service_name: &'static str) -> TelemetryGuard {
                 .with(filter)
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            TelemetryGuard { tracer_provider: None, meter_provider: None }
+            TelemetryGuard {
+                tracer_provider: None,
+                meter_provider: None,
+            }
         }
     }
 }
@@ -56,9 +59,9 @@ fn init_with_otel(
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
     use opentelemetry_sdk::{
+        Resource,
         metrics::{PeriodicReader, SdkMeterProvider},
         trace::SdkTracerProvider,
-        Resource,
     };
 
     let resource = Resource::builder()
@@ -95,9 +98,8 @@ fn init_with_otel(
     opentelemetry::global::set_meter_provider(meter_provider.clone());
 
     // Bridge tracing spans → OTel spans.
-    let otel_layer = tracing_opentelemetry::OpenTelemetryLayer::new(
-        tracer_provider.tracer(service_name),
-    );
+    let otel_layer =
+        tracing_opentelemetry::OpenTelemetryLayer::new(tracer_provider.tracer(service_name));
 
     tracing_subscriber::registry()
         .with(filter)

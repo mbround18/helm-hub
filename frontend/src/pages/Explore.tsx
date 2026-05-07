@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Document as FlexDocument } from 'flexsearch'
+import { useState, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Document as FlexDocument } from "flexsearch";
 import {
   Search,
   Package,
@@ -9,12 +9,12 @@ import {
   ArrowLeft,
   TrendingUp,
   Loader2,
-} from 'lucide-react'
-import { chartsApi, type PublicChart } from '../lib/api'
-import { ChartDetail, fmtDownloads } from '../components/ChartDetail'
-import { AppLogo } from '../components/AppLogo'
-import { useSettings } from '../hooks/useSettings'
-import clsx from 'clsx'
+} from "lucide-react";
+import { chartsApi, type PublicChart } from "../lib/api";
+import { ChartDetail, fmtDownloads } from "../components/ChartDetail";
+import { AppLogo } from "../components/AppLogo";
+import { useSettings } from "../hooks/useSettings";
+import clsx from "clsx";
 
 // ── FlexSearch setup ──────────────────────────────────────────────────────────
 
@@ -26,27 +26,36 @@ function buildIndex(charts: PublicChart[]): FlexDocument<any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const idx = new FlexDocument<any>({
     document: {
-      id: 'id',
-      store: true,  // required for enrich:true to populate doc in search results
+      id: "id",
+      store: true, // required for enrich:true to populate doc in search results
       index: [
-        { field: 'name',           tokenize: 'forward', resolution: 9 },
-        { field: 'owner_username', tokenize: 'forward', resolution: 6 },
-        { field: 'description',    tokenize: 'forward', resolution: 3 },
+        { field: "name", tokenize: "forward", resolution: 9 },
+        { field: "owner_username", tokenize: "forward", resolution: 6 },
+        { field: "description", tokenize: "forward", resolution: 3 },
       ],
     },
-    encoder: 'Default',
+    encoder: "Default",
     cache: 100,
-  })
-  for (const chart of charts) idx.add(chart)
-  return idx
+  });
+  for (const chart of charts) idx.add(chart);
+  return idx;
 }
 
 // ── Search suggestion item ────────────────────────────────────────────────────
 
-function SuggestionItem({ chart, onSelect }: { chart: PublicChart; onSelect: () => void }) {
+function SuggestionItem({
+  chart,
+  onSelect,
+}: {
+  chart: PublicChart;
+  onSelect: () => void;
+}) {
   return (
     <button
-      onMouseDown={(e) => { e.preventDefault(); onSelect() }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onSelect();
+      }}
       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors text-left group"
     >
       <div className="w-8 h-8 rounded-lg bg-violet-950/60 border border-violet-800/30 flex items-center justify-center shrink-0">
@@ -54,11 +63,17 @@ function SuggestionItem({ chart, onSelect }: { chart: PublicChart; onSelect: () 
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-white truncate">{chart.name}</span>
-          <span className="text-xs text-gray-600 shrink-0">by {chart.owner_username}</span>
+          <span className="text-sm font-medium text-white truncate">
+            {chart.name}
+          </span>
+          <span className="text-xs text-gray-600 shrink-0">
+            by {chart.owner_username}
+          </span>
         </div>
         {chart.description && (
-          <p className="text-xs text-gray-500 truncate mt-0.5">{chart.description}</p>
+          <p className="text-xs text-gray-500 truncate mt-0.5">
+            {chart.description}
+          </p>
         )}
       </div>
       {chart.download_count > 0 && (
@@ -68,12 +83,18 @@ function SuggestionItem({ chart, onSelect }: { chart: PublicChart; onSelect: () 
         </span>
       )}
     </button>
-  )
+  );
 }
 
 // ── Chart card (grid) ─────────────────────────────────────────────────────────
 
-function ChartCard({ chart, onSelect }: { chart: PublicChart; onSelect: () => void }) {
+function ChartCard({
+  chart,
+  onSelect,
+}: {
+  chart: PublicChart;
+  onSelect: () => void;
+}) {
   return (
     <button
       onClick={onSelect}
@@ -84,23 +105,35 @@ function ChartCard({ chart, onSelect }: { chart: PublicChart; onSelect: () => vo
           <Package className="w-5 h-5 text-violet-400" />
         </div>
         <div className="min-w-0 flex-1 pt-0.5">
-          <h3 className="text-sm font-semibold text-white truncate">{chart.name}</h3>
+          <h3 className="text-sm font-semibold text-white truncate">
+            {chart.name}
+          </h3>
           <span className="text-xs text-gray-600">{chart.owner_username}</span>
         </div>
       </div>
       {chart.description && (
-        <p className="text-xs text-gray-400 line-clamp-2 mb-3">{chart.description}</p>
+        <p className="text-xs text-gray-400 line-clamp-2 mb-3">
+          {chart.description}
+        </p>
       )}
       <div className="flex items-center justify-between mt-auto">
         {chart.keywords ? (
           <div className="flex items-center gap-1 flex-wrap min-w-0">
-            {chart.keywords.split(',').slice(0, 2).map((kw) => (
-              <span key={kw.trim()} className="text-xs bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded truncate">
-                {kw.trim()}
-              </span>
-            ))}
+            {chart.keywords
+              .split(",")
+              .slice(0, 2)
+              .map((kw) => (
+                <span
+                  key={kw.trim()}
+                  className="text-xs bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded truncate"
+                >
+                  {kw.trim()}
+                </span>
+              ))}
           </div>
-        ) : <span />}
+        ) : (
+          <span />
+        )}
         {chart.download_count > 0 && (
           <span className="flex items-center gap-1 text-xs text-gray-600 shrink-0">
             <Download className="w-3 h-3" />
@@ -109,66 +142,66 @@ function ChartCard({ chart, onSelect }: { chart: PublicChart; onSelect: () => vo
         )}
       </div>
     </button>
-  )
+  );
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function Explore() {
-  const [query, setQuery] = useState('')
-  const [focused, setFocused] = useState(false)
-  const [selected, setSelected] = useState<PublicChart | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const { app_name } = useSettings()
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [selected, setSelected] = useState<PublicChart | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { app_name } = useSettings();
 
   // Load all charts (sorted by downloads) for Fuse.js index
   const { data: allCharts = [], isLoading } = useQuery({
-    queryKey: ['charts', 'explore-all'],
+    queryKey: ["charts", "explore-all"],
     queryFn: () => chartsApi.list({ per_page: 200 }).then((r) => r.data),
     staleTime: 60_000,
-  })
+  });
 
   // FlexSearch index — rebuilt only when chart data changes
-  const index = useMemo(() => buildIndex(allCharts), [allCharts])
+  const index = useMemo(() => buildIndex(allCharts), [allCharts]);
 
   // Search results (min 3 chars) — deduplicated across per-field result sets
   const results = useMemo<PublicChart[]>(() => {
-    if (query.length < 3) return []
+    if (query.length < 3) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw: any[] = index.search(query, { limit: 8, enrich: true })
-    const seen = new Set<string>()
-    const out: PublicChart[] = []
+    const raw: any[] = index.search(query, { limit: 8, enrich: true });
+    const seen = new Set<string>();
+    const out: PublicChart[] = [];
     for (const { result } of raw) {
       for (const { id, doc } of result) {
         if (doc && !seen.has(String(id))) {
-          seen.add(String(id))
-          out.push(doc as PublicChart)
-          if (out.length >= 8) return out
+          seen.add(String(id));
+          out.push(doc as PublicChart);
+          if (out.length >= 8) return out;
         }
       }
     }
-    return out
-  }, [index, query])
+    return out;
+  }, [index, query]);
 
   // Cards shown below the search bar
   const gridCharts = useMemo<PublicChart[]>(() => {
-    if (query.length >= 3) return results
-    return allCharts.slice(0, 24) // top 24 by downloads when idle
-  }, [query, results, allCharts])
+    if (query.length >= 3) return results;
+    return allCharts.slice(0, 24); // top 24 by downloads when idle
+  }, [query, results, allCharts]);
 
-  const showDropdown = focused && query.length >= 3 && results.length > 0
-  const hasQuery = query.length >= 3
+  const showDropdown = focused && query.length >= 3 && results.length > 0;
+  const hasQuery = query.length >= 3;
 
   const selectChart = (chart: PublicChart) => {
-    setSelected(chart)
-    setFocused(false)
-  }
+    setSelected(chart);
+    setFocused(false);
+  };
 
   const clearSearch = () => {
-    setQuery('')
-    setSelected(null)
-    inputRef.current?.focus()
-  }
+    setQuery("");
+    setSelected(null);
+    inputRef.current?.focus();
+  };
 
   // ── Selected chart view ──────────────────────────────────────────────────────
   if (selected) {
@@ -188,7 +221,10 @@ export function Explore() {
             <input
               ref={inputRef}
               value={query}
-              onChange={(e) => { setQuery(e.target.value); setSelected(null) }}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSelected(null);
+              }}
               onFocus={() => setFocused(true)}
               onBlur={() => setTimeout(() => setFocused(false), 100)}
               placeholder="Search charts…"
@@ -207,30 +243,50 @@ export function Explore() {
           downloadCount={selected.download_count}
         />
       </div>
-    )
+    );
   }
 
   // ── Hero / search view ───────────────────────────────────────────────────────
   return (
     <div className="min-h-full">
       {/* Hero */}
-      <div className={clsx('transition-all duration-300 text-center px-6', hasQuery ? 'pt-10 pb-6' : 'pt-24 pb-10')}>
+      <div
+        className={clsx(
+          "transition-all duration-300 text-center px-6",
+          hasQuery ? "pt-10 pb-6" : "pt-24 pb-10",
+        )}
+      >
         {!hasQuery && (
           <>
             <div className="flex justify-center mb-5">
-              <AppLogo size="lg" showName={false} className="text-violet-400 w-16 h-16 rounded-2xl bg-violet-950/60 border border-violet-800/50 justify-center" />
+              <AppLogo
+                size="lg"
+                showName={false}
+                className="text-violet-400 w-16 h-16 rounded-2xl bg-violet-950/60 border border-violet-800/50 justify-center"
+              />
             </div>
             <h1 className="text-3xl font-bold text-white mb-2">{app_name}</h1>
-            <p className="text-gray-400 text-sm mb-8">Discover, install, and share Helm charts</p>
+            <p className="text-gray-400 text-sm mb-8">
+              Discover, install, and share Helm charts
+            </p>
           </>
         )}
 
         {/* Search bar */}
-        <div className={clsx('relative mx-auto transition-all duration-300', hasQuery ? 'max-w-2xl' : 'max-w-xl')}>
-          <div className={clsx(
-            'flex items-center gap-3 bg-gray-900 border rounded-2xl px-4 py-3 transition-all duration-200',
-            focused ? 'border-violet-600 shadow-lg shadow-violet-900/20' : 'border-gray-800',
-          )}>
+        <div
+          className={clsx(
+            "relative mx-auto transition-all duration-300",
+            hasQuery ? "max-w-2xl" : "max-w-xl",
+          )}
+        >
+          <div
+            className={clsx(
+              "flex items-center gap-3 bg-gray-900 border rounded-2xl px-4 py-3 transition-all duration-200",
+              focused
+                ? "border-violet-600 shadow-lg shadow-violet-900/20"
+                : "border-gray-800",
+            )}
+          >
             {isLoading ? (
               <Loader2 className="w-5 h-5 text-gray-500 shrink-0 animate-spin" />
             ) : (
@@ -248,18 +304,26 @@ export function Explore() {
               spellCheck={false}
             />
             {query && (
-              <button onClick={clearSearch} className="text-gray-600 hover:text-gray-400 transition-colors">
+              <button
+                onClick={clearSearch}
+                className="text-gray-600 hover:text-gray-400 transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
           {/* Suggestion dropdown */}
-          {showDropdown && <SearchDropdown results={results} onSelect={selectChart} />}
+          {showDropdown && (
+            <SearchDropdown results={results} onSelect={selectChart} />
+          )}
 
           {/* Min-chars hint */}
           {focused && query.length > 0 && query.length < 3 && (
-            <p className="text-xs text-gray-600 mt-2">Type {3 - query.length} more character{3 - query.length !== 1 ? 's' : ''}…</p>
+            <p className="text-xs text-gray-600 mt-2">
+              Type {3 - query.length} more character
+              {3 - query.length !== 1 ? "s" : ""}…
+            </p>
           )}
         </div>
       </div>
@@ -271,7 +335,8 @@ export function Explore() {
             <>
               <Search className="w-3.5 h-3.5 text-gray-600" />
               <span className="text-xs text-gray-500">
-                {results.length} result{results.length !== 1 ? 's' : ''} for <span className="text-gray-300">"{query}"</span>
+                {results.length} result{results.length !== 1 ? "s" : ""} for{" "}
+                <span className="text-gray-300">"{query}"</span>
               </span>
             </>
           ) : (
@@ -286,7 +351,10 @@ export function Explore() {
         {isLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-36 bg-gray-800 rounded-xl animate-pulse" />
+              <div
+                key={i}
+                className="h-36 bg-gray-800 rounded-xl animate-pulse"
+              />
             ))}
           </div>
         ) : gridCharts.length === 0 ? (
@@ -297,25 +365,39 @@ export function Explore() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {gridCharts.map((chart) => (
-              <ChartCard key={chart.id} chart={chart} onSelect={() => selectChart(chart)} />
+              <ChartCard
+                key={chart.id}
+                chart={chart}
+                onSelect={() => selectChart(chart)}
+              />
             ))}
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }
 
 // ── Dropdown (shared between hero and compact bar) ────────────────────────────
 
-function SearchDropdown({ results, onSelect }: { results: PublicChart[]; onSelect: (c: PublicChart) => void }) {
+function SearchDropdown({
+  results,
+  onSelect,
+}: {
+  results: PublicChart[];
+  onSelect: (c: PublicChart) => void;
+}) {
   return (
     <div className="absolute top-full mt-2 left-0 right-0 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-50">
       <div className="divide-y divide-gray-800/50">
         {results.map((chart) => (
-          <SuggestionItem key={chart.id} chart={chart} onSelect={() => onSelect(chart)} />
+          <SuggestionItem
+            key={chart.id}
+            chart={chart}
+            onSelect={() => onSelect(chart)}
+          />
         ))}
       </div>
     </div>
-  )
+  );
 }

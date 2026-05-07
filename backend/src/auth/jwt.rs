@@ -39,7 +39,11 @@ pub fn decode_jwt(token: &str, secret: &str) -> Result<Claims, AppError> {
     // Explicitly pin to HS256 — rejects "none" and any other algorithm.
     let mut validation = Validation::new(Algorithm::HS256);
     validation.leeway = 0;
-    decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
-        .map(|data| data.claims)
-        .map_err(|e| AppError::Unauthorized(e.to_string()))
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map(|data| data.claims)
+    .map_err(|e| AppError::Unauthorized(e.to_string()))
 }

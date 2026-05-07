@@ -157,8 +157,7 @@ pub async fn purge_user(
         .map_err(|_| AppError::NotFound("User not found".into()))?;
 
     // Delete chart files from disk first (best-effort).
-    let storage_root = std::path::Path::new(&state.config.charts_storage_path)
-        .join(&user.username);
+    let storage_root = std::path::Path::new(&state.config.charts_storage_path).join(&user.username);
     if storage_root.exists() {
         let _ = tokio::fs::remove_dir_all(&storage_root).await;
     }
@@ -220,7 +219,8 @@ pub async fn delete_any_chart(
         .select(crate::db::models::ChartVersion::as_select())
         .load(&mut conn)?;
 
-    let total_bytes: i64 = versions.iter()
+    let total_bytes: i64 = versions
+        .iter()
         .map(|v| {
             let p = std::path::Path::new(&state.config.charts_storage_path).join(&v.storage_path);
             std::fs::metadata(&p).map(|m| m.len() as i64).unwrap_or(0)
@@ -314,7 +314,9 @@ pub async fn update_settings(
     if let Some(ref name) = body.app_name {
         let trimmed = name.trim();
         if trimmed.is_empty() || trimmed.len() > 64 {
-            return Err(AppError::BadRequest("app_name must be 1–64 characters".into()));
+            return Err(AppError::BadRequest(
+                "app_name must be 1–64 characters".into(),
+            ));
         }
         settings::set(&mut conn, "app_name", trimmed)?;
     }
@@ -325,13 +327,19 @@ pub async fn update_settings(
             && !trimmed.starts_with("https://")
             && !trimmed.starts_with("http://")
         {
-            return Err(AppError::BadRequest("logo_url must be an http/https URL or empty".into()));
+            return Err(AppError::BadRequest(
+                "logo_url must be an http/https URL or empty".into(),
+            ));
         }
         settings::set(&mut conn, "logo_url", trimmed)?;
     }
 
     if let Some(enabled) = body.signup_enabled {
-        settings::set(&mut conn, "signup_enabled", if enabled { "true" } else { "false" })?;
+        settings::set(
+            &mut conn,
+            "signup_enabled",
+            if enabled { "true" } else { "false" },
+        )?;
     }
 
     let meta = serde_json::json!({
@@ -339,7 +347,14 @@ pub async fn update_settings(
         "logo_url": body.logo_url,
         "signup_enabled": body.signup_enabled,
     });
-    audit(&mut conn, &claims.sub, "update_settings", "settings", "global", Some(meta))?;
+    audit(
+        &mut conn,
+        &claims.sub,
+        "update_settings",
+        "settings",
+        "global",
+        Some(meta),
+    )?;
 
     Ok(StatusCode::NO_CONTENT)
 }

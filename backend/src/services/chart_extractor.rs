@@ -48,7 +48,10 @@ pub fn validate_path_segment(s: &str, field: &str) -> io::Result<()> {
         ));
     }
     // Allowlist: alphanumeric, hyphen, dot, underscore, plus (SemVer build metadata).
-    if !s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '+')) {
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '+'))
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{field} contains characters outside the allowed set [A-Za-z0-9._+-]"),
@@ -106,8 +109,7 @@ pub fn extract_chart_metadata(bytes: &[u8]) -> io::Result<ExtractedChart> {
 
         match file_name {
             "Chart.yaml" => {
-                let content =
-                    read_limited(&mut entry, MAX_METADATA_FILE_BYTES, "Chart.yaml")?;
+                let content = read_limited(&mut entry, MAX_METADATA_FILE_BYTES, "Chart.yaml")?;
                 total_bytes += content.len() as u64;
                 if total_bytes > MAX_TOTAL_METADATA_BYTES {
                     return Err(io::Error::new(
@@ -118,8 +120,7 @@ pub fn extract_chart_metadata(bytes: &[u8]) -> io::Result<ExtractedChart> {
                 chart_yaml = Some(content);
             }
             "values.yaml" => {
-                let content =
-                    read_limited(&mut entry, MAX_METADATA_FILE_BYTES, "values.yaml")?;
+                let content = read_limited(&mut entry, MAX_METADATA_FILE_BYTES, "values.yaml")?;
                 total_bytes += content.len() as u64;
                 if total_bytes > MAX_TOTAL_METADATA_BYTES {
                     return Err(io::Error::new(
@@ -145,8 +146,9 @@ pub fn extract_chart_metadata(bytes: &[u8]) -> io::Result<ExtractedChart> {
         }
     }
 
-    let chart_yaml = chart_yaml
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Chart.yaml not found in archive"))?;
+    let chart_yaml = chart_yaml.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, "Chart.yaml not found in archive")
+    })?;
 
     Ok(ExtractedChart {
         chart_yaml,

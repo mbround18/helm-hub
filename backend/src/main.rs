@@ -146,7 +146,10 @@ async fn main() {
     // ── Admin routes — JWT or API token required + admin role ────────────────
     let admin_routes = Router::new()
         .route("/api/admin/users", get(api::admin::list_users))
-        .route("/api/admin/users/{id}/promote", post(api::admin::promote_user))
+        .route(
+            "/api/admin/users/{id}/promote",
+            post(api::admin::promote_user),
+        )
         .route("/api/admin/users/{id}/ban", post(api::admin::ban_user))
         .route("/api/admin/users/{id}", delete(api::admin::purge_user))
         .route(

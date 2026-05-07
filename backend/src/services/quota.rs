@@ -1,11 +1,6 @@
 use diesel::{prelude::*, sql_query, sql_types::BigInt};
 
-use crate::{
-    AppState,
-    db::DbConn,
-    error::AppError,
-    schema::users,
-};
+use crate::{AppState, db::DbConn, error::AppError, schema::users};
 
 /// Atomically reserve `bytes` of quota for `user_id`.
 ///

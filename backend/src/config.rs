@@ -54,9 +54,7 @@ impl Config {
 
         // Derive oauth_state_secret: domain-separated SHA-256 of jwt_secret.
         let oauth_state_secret = env::var("OAUTH_STATE_SECRET").unwrap_or_else(|_| {
-            let hash = Sha256::digest(
-                format!("helm-hub-oauth-state:{jwt_secret}").as_bytes(),
-            );
+            let hash = Sha256::digest(format!("helm-hub-oauth-state:{jwt_secret}").as_bytes());
             hex::encode(hash)
         });
 
@@ -66,9 +64,7 @@ impl Config {
             .and_then(|k| hex::decode(&k).ok())
             .and_then(|b| b.try_into().ok())
             .unwrap_or_else(|| {
-                let hash = Sha256::digest(
-                    format!("helm-hub-token-enc:{jwt_secret}").as_bytes(),
-                );
+                let hash = Sha256::digest(format!("helm-hub-token-enc:{jwt_secret}").as_bytes());
                 hash.into()
             });
 

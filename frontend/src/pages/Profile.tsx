@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
   Key,
   Plus,
@@ -16,7 +16,7 @@ import {
   Link,
   CheckCircle2,
   Loader2,
-} from 'lucide-react'
+} from "lucide-react";
 import {
   tokensApi,
   githubApi,
@@ -25,60 +25,60 @@ import {
   type TokenTtlDays,
   type GithubRepo,
   type ChartSyncEntry,
-} from '../lib/api'
-import { useAuthStore } from '../stores/auth'
+} from "../lib/api";
+import { useAuthStore } from "../stores/auth";
 
 const TTL_OPTIONS: { label: string; value: TokenTtlDays }[] = [
-  { label: '30 days', value: 30 },
-  { label: '60 days', value: 60 },
-  { label: '90 days', value: 90 },
-  { label: '180 days', value: 180 },
-  { label: '1 year', value: 365 },
-]
+  { label: "30 days", value: 30 },
+  { label: "60 days", value: 60 },
+  { label: "90 days", value: 90 },
+  { label: "180 days", value: 180 },
+  { label: "1 year", value: 365 },
+];
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function isExpired(iso: string) {
-  return new Date(iso) < new Date()
+  return new Date(iso) < new Date();
 }
 
 function expiresLabel(iso: string) {
-  if (isExpired(iso)) return 'Expired'
-  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000)
-  if (days === 1) return 'Expires tomorrow'
-  if (days <= 14) return `Expires in ${days} days`
-  return `Expires ${formatDate(iso)}`
+  if (isExpired(iso)) return "Expired";
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
+  if (days === 1) return "Expires tomorrow";
+  if (days <= 14) return `Expires in ${days} days`;
+  return `Expires ${formatDate(iso)}`;
 }
 
 // ── New-token modal ───────────────────────────────────────────────────────────
 
 function NewTokenModal({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient()
-  const [description, setDescription] = useState('')
-  const [ttl, setTtl] = useState<TokenTtlDays>(90)
-  const [created, setCreated] = useState<CreatedToken | null>(null)
-  const [copied, setCopied] = useState(false)
+  const qc = useQueryClient();
+  const [description, setDescription] = useState("");
+  const [ttl, setTtl] = useState<TokenTtlDays>(90);
+  const [created, setCreated] = useState<CreatedToken | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const create = useMutation({
     mutationFn: () => tokensApi.create(description.trim(), ttl),
     onSuccess: (res) => {
-      setCreated(res.data)
-      qc.invalidateQueries({ queryKey: ['tokens'] })
+      setCreated(res.data);
+      qc.invalidateQueries({ queryKey: ["tokens"] });
     },
-  })
+  });
 
   const copyToken = () => {
-    if (!created) return
-    navigator.clipboard.writeText(created.token)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+    if (!created) return;
+    navigator.clipboard.writeText(created.token);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -86,7 +86,7 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <h2 className="text-base font-semibold text-white">
-            {created ? 'Token created' : 'New access token'}
+            {created ? "Token created" : "New access token"}
           </h2>
           <button
             onClick={onClose}
@@ -123,9 +123,12 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
               </div>
 
               <p className="text-xs text-gray-500">
-                Description:{' '}
+                Description:{" "}
                 <span className="text-gray-300">{created.description}</span>
-                {' · '}Expires <span className="text-gray-300">{formatDate(created.expires_at)}</span>
+                {" · "}Expires{" "}
+                <span className="text-gray-300">
+                  {formatDate(created.expires_at)}
+                </span>
               </p>
 
               <button
@@ -139,7 +142,9 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
             // ── Create form ──────────────────────────────────────────────────
             <>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-gray-400">Description</label>
+                <label className="text-xs font-medium text-gray-400">
+                  Description
+                </label>
                 <input
                   type="text"
                   value={description}
@@ -151,7 +156,9 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-gray-400">Expiration</label>
+                <label className="text-xs font-medium text-gray-400">
+                  Expiration
+                </label>
                 <div className="grid grid-cols-5 gap-1.5">
                   {TTL_OPTIONS.map((opt) => (
                     <button
@@ -159,8 +166,8 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
                       onClick={() => setTtl(opt.value)}
                       className={
                         ttl === opt.value
-                          ? 'py-2 rounded-lg text-xs font-medium bg-violet-600 text-white'
-                          : 'py-2 rounded-lg text-xs font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors'
+                          ? "py-2 rounded-lg text-xs font-medium bg-violet-600 text-white"
+                          : "py-2 rounded-lg text-xs font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors"
                       }
                     >
                       {opt.label}
@@ -172,7 +179,8 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
               {create.isError && (
                 <div className="flex items-center gap-2 text-red-400 bg-red-950/40 border border-red-800 rounded-lg px-3 py-2 text-xs">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  {(create.error as any)?.response?.data?.error ?? 'Failed to create token'}
+                  {(create.error as any)?.response?.data?.error ??
+                    "Failed to create token"}
                 </div>
               )}
 
@@ -181,14 +189,14 @@ function NewTokenModal({ onClose }: { onClose: () => void }) {
                 disabled={create.isPending || description.trim().length === 0}
                 className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium transition-colors"
               >
-                {create.isPending ? 'Generating…' : 'Generate token'}
+                {create.isPending ? "Generating…" : "Generate token"}
               </button>
             </>
           )}
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 // ── Token row ─────────────────────────────────────────────────────────────────
@@ -197,21 +205,25 @@ function TokenRow({
   token,
   onRevoke,
 }: {
-  token: ApiToken
-  onRevoke: () => void
+  token: ApiToken;
+  onRevoke: () => void;
 }) {
-  const expired = isExpired(token.expires_at)
+  const expired = isExpired(token.expires_at);
   return (
     <div className="flex items-start justify-between px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg gap-4">
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
           <Key className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-          <span className="text-sm font-medium text-white truncate">{token.description}</span>
+          <span className="text-sm font-medium text-white truncate">
+            {token.description}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
           <span className="flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            <span className={expired ? 'text-red-400' : ''}>{expiresLabel(token.expires_at)}</span>
+            <span className={expired ? "text-red-400" : ""}>
+              {expiresLabel(token.expires_at)}
+            </span>
           </span>
           <span>Created {formatDate(token.created_at)}</span>
           {token.last_used_at && (
@@ -227,34 +239,41 @@ function TokenRow({
         <Trash2 className="w-4 h-4" />
       </button>
     </div>
-  )
+  );
 }
 
 // ── GitHub: add-repo modal ────────────────────────────────────────────────────
 
 function AddRepoModal({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient()
-  const [slug, setSlug] = useState('')
+  const qc = useQueryClient();
+  const [slug, setSlug] = useState("");
   const add = useMutation({
     mutationFn: () => githubApi.addRepo(slug.trim()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['github-repos'] })
-      onClose()
+      qc.invalidateQueries({ queryKey: ["github-repos"] });
+      onClose();
     },
-  })
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-sm rounded-xl border border-gray-800 bg-gray-900 shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <h2 className="text-base font-semibold text-white">Link GitHub repository</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+          <h2 className="text-base font-semibold text-white">
+            Link GitHub repository
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-white transition-colors"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="p-5 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-gray-400">Repository</label>
+            <label className="text-xs font-medium text-gray-400">
+              Repository
+            </label>
             <input
               type="text"
               value={slug}
@@ -263,42 +282,51 @@ function AddRepoModal({ onClose }: { onClose: () => void }) {
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-violet-500 font-mono"
             />
             <p className="text-xs text-gray-600">
-              Helm chart releases follow the{' '}
-              <code className="text-gray-400">chart-name-1.2.3.tgz</code> naming convention.
+              Helm chart releases follow the{" "}
+              <code className="text-gray-400">chart-name-1.2.3.tgz</code> naming
+              convention.
             </p>
           </div>
           {add.isError && (
             <div className="flex items-center gap-2 text-red-400 text-xs bg-red-950/40 border border-red-800 rounded-lg px-3 py-2">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              {(add.error as any)?.response?.data?.error ?? 'Failed to add repository'}
+              {(add.error as any)?.response?.data?.error ??
+                "Failed to add repository"}
             </div>
           )}
           <button
             onClick={() => add.mutate()}
-            disabled={add.isPending || !slug.includes('/')}
+            disabled={add.isPending || !slug.includes("/")}
             className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium transition-colors"
           >
-            {add.isPending ? 'Adding…' : 'Add repository'}
+            {add.isPending ? "Adding…" : "Add repository"}
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 // ── GitHub: sync result display ───────────────────────────────────────────────
 
-function SyncResults({ entries, repo }: { entries: ChartSyncEntry[]; repo: string }) {
-  const imported = entries.filter((e) => e.status === 'imported')
-  const skipped = entries.filter((e) => e.status === 'skipped')
-  const failed = entries.filter((e) => e.status === 'failed')
+function SyncResults({
+  entries,
+  repo,
+}: {
+  entries: ChartSyncEntry[];
+  repo: string;
+}) {
+  const imported = entries.filter((e) => e.status === "imported");
+  const skipped = entries.filter((e) => e.status === "skipped");
+  const failed = entries.filter((e) => e.status === "failed");
 
   return (
     <div className="mt-3 space-y-2 text-xs">
       {imported.length > 0 && (
         <div className="bg-emerald-950/40 border border-emerald-800 rounded-lg px-3 py-2">
           <p className="text-emerald-400 font-medium mb-1">
-            {imported.length} version{imported.length !== 1 ? 's' : ''} imported from {repo}
+            {imported.length} version{imported.length !== 1 ? "s" : ""} imported
+            from {repo}
           </p>
           {imported.map((e) => (
             <p key={e.chart + e.version} className="text-emerald-600 font-mono">
@@ -309,7 +337,9 @@ function SyncResults({ entries, repo }: { entries: ChartSyncEntry[]; repo: strin
       )}
       {failed.length > 0 && (
         <div className="bg-red-950/40 border border-red-800 rounded-lg px-3 py-2">
-          <p className="text-red-400 font-medium mb-1">{failed.length} failed</p>
+          <p className="text-red-400 font-medium mb-1">
+            {failed.length} failed
+          </p>
           {failed.map((e) => (
             <p key={e.chart + e.version} className="text-red-600">
               {e.chart} v{e.version}: {e.message}
@@ -319,34 +349,35 @@ function SyncResults({ entries, repo }: { entries: ChartSyncEntry[]; repo: strin
       )}
       {imported.length === 0 && failed.length === 0 && (
         <p className="text-gray-600">
-          All {skipped.length} version{skipped.length !== 1 ? 's' : ''} already imported — nothing new.
+          All {skipped.length} version{skipped.length !== 1 ? "s" : ""} already
+          imported — nothing new.
         </p>
       )}
     </div>
-  )
+  );
 }
 
 // ── GitHub: repo row ──────────────────────────────────────────────────────────
 
 function RepoRow({ repo }: { repo: GithubRepo }) {
-  const qc = useQueryClient()
-  const [syncResult, setSyncResult] = useState<ChartSyncEntry[] | null>(null)
+  const qc = useQueryClient();
+  const [syncResult, setSyncResult] = useState<ChartSyncEntry[] | null>(null);
 
   const sync = useMutation({
     mutationFn: () => githubApi.syncRepo(repo.id),
     onSuccess: (res) => {
-      setSyncResult(res.data.entries)
-      qc.invalidateQueries({ queryKey: ['github-repos'] })
-      qc.invalidateQueries({ queryKey: ['charts'] })
+      setSyncResult(res.data.entries);
+      qc.invalidateQueries({ queryKey: ["github-repos"] });
+      qc.invalidateQueries({ queryKey: ["charts"] });
     },
-  })
+  });
 
   const remove = useMutation({
     mutationFn: () => githubApi.removeRepo(repo.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['github-repos'] }),
-  })
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["github-repos"] }),
+  });
 
-  const fullName = `${repo.repo_owner}/${repo.repo_name}`
+  const fullName = `${repo.repo_owner}/${repo.repo_name}`;
 
   return (
     <div className="px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg space-y-2">
@@ -381,7 +412,7 @@ function RepoRow({ repo }: { repo: GithubRepo }) {
             ) : (
               <RefreshCw className="w-3.5 h-3.5" />
             )}
-            {sync.isPending ? 'Syncing…' : 'Sync now'}
+            {sync.isPending ? "Syncing…" : "Sync now"}
           </button>
           <button
             onClick={() => remove.mutate()}
@@ -396,49 +427,47 @@ function RepoRow({ repo }: { repo: GithubRepo }) {
 
       {sync.isError && (
         <p className="text-xs text-red-400">
-          {(sync.error as any)?.response?.data?.error ?? 'Sync failed'}
+          {(sync.error as any)?.response?.data?.error ?? "Sync failed"}
         </p>
       )}
-      {syncResult && (
-        <SyncResults entries={syncResult} repo={fullName} />
-      )}
+      {syncResult && <SyncResults entries={syncResult} repo={fullName} />}
     </div>
-  )
+  );
 }
 
 // ── GitHub section ────────────────────────────────────────────────────────────
 
 function GithubSection() {
-  const qc = useQueryClient()
-  const [showAddRepo, setShowAddRepo] = useState(false)
+  const qc = useQueryClient();
+  const [showAddRepo, setShowAddRepo] = useState(false);
 
   const { data: connData, isLoading: connLoading } = useQuery({
-    queryKey: ['github-connection'],
+    queryKey: ["github-connection"],
     queryFn: () => githubApi.getConnection().then((r) => r.data.connection),
-  })
+  });
 
   const { data: repos = [], isLoading: reposLoading } = useQuery({
-    queryKey: ['github-repos'],
+    queryKey: ["github-repos"],
     queryFn: () => githubApi.listRepos().then((r) => r.data),
     enabled: !!connData,
-  })
+  });
 
   const disconnect = useMutation({
     mutationFn: () => githubApi.deleteConnection(),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['github-connection'] })
-      qc.invalidateQueries({ queryKey: ['github-repos'] })
+      qc.invalidateQueries({ queryKey: ["github-connection"] });
+      qc.invalidateQueries({ queryKey: ["github-repos"] });
     },
-  })
+  });
 
   const connectGitHub = async () => {
     try {
-      const res = await githubApi.oauthUrl(window.location.href)
-      window.location.href = res.data.url
+      const res = await githubApi.oauthUrl(window.location.href);
+      window.location.href = res.data.url;
     } catch {
       // Server likely doesn't have GitHub configured
     }
-  }
+  };
 
   return (
     <div className="space-y-4">
@@ -451,7 +480,8 @@ function GithubSection() {
             GitHub
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            Link your GitHub account for SSO and sync chart releases automatically.
+            Link your GitHub account for SSO and sync chart releases
+            automatically.
           </p>
         </div>
         {connData && (
@@ -486,7 +516,9 @@ function GithubSection() {
                   </span>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 </div>
-                <p className="text-xs text-gray-500">GitHub account connected</p>
+                <p className="text-xs text-gray-500">
+                  GitHub account connected
+                </p>
               </div>
             </div>
             <button
@@ -530,52 +562,54 @@ function GithubSection() {
         </button>
       )}
     </div>
-  )
+  );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function Profile() {
-  const { user } = useAuthStore()
-  const qc = useQueryClient()
-  const [showModal, setShowModal] = useState(false)
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [githubBanner, setGithubBanner] = useState<'connected' | 'error' | null>(null)
+  const { user } = useAuthStore();
+  const qc = useQueryClient();
+  const [showModal, setShowModal] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [githubBanner, setGithubBanner] = useState<
+    "connected" | "error" | null
+  >(null);
 
   // Handle GitHub OAuth redirect result
   useEffect(() => {
-    const github = searchParams.get('github')
-    if (github === 'connected') {
-      setGithubBanner('connected')
-      qc.invalidateQueries({ queryKey: ['github-connection'] })
-    } else if (github === 'error') {
-      setGithubBanner('error')
+    const github = searchParams.get("github");
+    if (github === "connected") {
+      setGithubBanner("connected");
+      qc.invalidateQueries({ queryKey: ["github-connection"] });
+    } else if (github === "error") {
+      setGithubBanner("error");
     }
     if (github) {
       setSearchParams((p) => {
-        p.delete('github')
-        p.delete('github_msg')
-        return p
-      })
+        p.delete("github");
+        p.delete("github_msg");
+        return p;
+      });
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: tokens = [], isLoading } = useQuery({
-    queryKey: ['tokens'],
+    queryKey: ["tokens"],
     queryFn: () => tokensApi.list().then((r) => r.data),
-  })
+  });
 
   const revoke = useMutation({
     mutationFn: (id: string) => tokensApi.revoke(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tokens'] }),
-  })
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }),
+  });
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-8">
       {showModal && <NewTokenModal onClose={() => setShowModal(false)} />}
 
       {/* GitHub OAuth banner */}
-      {githubBanner === 'connected' && (
+      {githubBanner === "connected" && (
         <div className="flex items-center gap-2 text-emerald-400 bg-emerald-950/40 border border-emerald-800 rounded-lg px-4 py-3 text-sm">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           GitHub account connected successfully.
@@ -587,7 +621,7 @@ export function Profile() {
           </button>
         </div>
       )}
-      {githubBanner === 'error' && (
+      {githubBanner === "error" && (
         <div className="flex items-center gap-2 text-red-400 bg-red-950/40 border border-red-800 rounded-lg px-4 py-3 text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           GitHub connection failed. Please try again.
@@ -627,7 +661,8 @@ export function Profile() {
               Personal access tokens
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Use these instead of your password to upload charts from scripts or CI.
+              Use these instead of your password to upload charts from scripts
+              or CI.
             </p>
           </div>
           <button
@@ -642,7 +677,10 @@ export function Profile() {
         {isLoading ? (
           <div className="space-y-2">
             {[1, 2].map((i) => (
-              <div key={i} className="h-16 bg-gray-800 rounded-lg animate-pulse" />
+              <div
+                key={i}
+                className="h-16 bg-gray-800 rounded-lg animate-pulse"
+              />
             ))}
           </div>
         ) : tokens.length === 0 ? (
@@ -653,19 +691,25 @@ export function Profile() {
         ) : (
           <div className="space-y-2">
             {tokens.map((t) => (
-              <TokenRow key={t.id} token={t} onRevoke={() => revoke.mutate(t.id)} />
+              <TokenRow
+                key={t.id}
+                token={t}
+                onRevoke={() => revoke.mutate(t.id)}
+              />
             ))}
           </div>
         )}
 
         {tokens.length > 0 && (
           <p className="text-xs text-gray-600">
-            Pass a token as{' '}
-            <code className="text-violet-400">Authorization: Bearer hhub_…</code> on any
-            authenticated API call.
+            Pass a token as{" "}
+            <code className="text-violet-400">
+              Authorization: Bearer hhub_…
+            </code>{" "}
+            on any authenticated API call.
           </p>
         )}
       </div>
     </div>
-  )
+  );
 }

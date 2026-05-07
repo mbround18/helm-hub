@@ -117,7 +117,12 @@ async fn exchange_code(
         .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")
         .header("User-Agent", "helm-hub/1.0")
-        .json(&Body { client_id, client_secret, code, redirect_uri })
+        .json(&Body {
+            client_id,
+            client_secret,
+            code,
+            redirect_uri,
+        })
         .send()
         .await
         .map_err(|_| AppError::Internal("GitHub token exchange failed".into()))?;
@@ -179,8 +184,7 @@ pub async fn oauth_url(
     // Validate return_to before embedding in the signed state.
     let return_to = safe_return_to(q.return_to.as_deref());
 
-    let oauth_state =
-        encode_oauth_state(&claims.sub, return_to, &state.config.oauth_state_secret)?;
+    let oauth_state = encode_oauth_state(&claims.sub, return_to, &state.config.oauth_state_secret)?;
 
     // Scope: `read:user` (profile) + `public_repo` (read public releases).
     // We deliberately do NOT request the `repo` scope (full private repo access).
@@ -210,10 +214,7 @@ pub async fn oauth_callback(
 ) -> impl IntoResponse {
     // Generic error page — never forward internal details to the browser.
     let redirect_err = |return_to: &str| {
-        Redirect::to(&format!(
-            "{}?github=error",
-            safe_return_to(Some(return_to))
-        ))
+        Redirect::to(&format!("{}?github=error", safe_return_to(Some(return_to))))
     };
 
     if q.error.is_some() {
@@ -225,11 +226,10 @@ pub async fn oauth_callback(
         _ => return redirect_err("/profile"),
     };
 
-    let oauth_state =
-        match decode_oauth_state(&raw_state, &state.config.oauth_state_secret) {
-            Ok(s) => s,
-            Err(_) => return redirect_err("/profile"),
-        };
+    let oauth_state = match decode_oauth_state(&raw_state, &state.config.oauth_state_secret) {
+        Ok(s) => s,
+        Err(_) => return redirect_err("/profile"),
+    };
 
     let return_to = safe_return_to(Some(&oauth_state.return_to));
 
@@ -241,16 +241,21 @@ pub async fn oauth_callback(
     let client_secret = state.config.github_client_secret.as_deref().unwrap();
     let redirect_uri = state.config.github_redirect_uri.as_deref().unwrap();
 
-    let access_token =
-        match exchange_code(&state.http_client, client_id, client_secret, redirect_uri, &code)
-            .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!(error = %e, "GitHub token exchange error");
-                return redirect_err(return_to);
-            }
-        };
+    let access_token = match exchange_code(
+        &state.http_client,
+        client_id,
+        client_secret,
+        redirect_uri,
+        &code,
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "GitHub token exchange error");
+            return redirect_err(return_to);
+        }
+    };
 
     let gh_user = match get_github_user(&state.http_client, &access_token).await {
         Ok(u) => u,
@@ -355,10 +360,8 @@ pub async fn delete_connection(
     Extension(claims): Extension<Claims>,
 ) -> Result<StatusCode, AppError> {
     let mut conn = state.db.get()?;
-    diesel::delete(
-        github_connections::table.filter(github_connections::user_id.eq(&claims.sub)),
-    )
-    .execute(&mut conn)?;
+    diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&claims.sub)))
+        .execute(&mut conn)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

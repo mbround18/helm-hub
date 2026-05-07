@@ -10,7 +10,7 @@ use diesel::prelude::*;
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
-use crate::{schema::rate_limit_windows, AppState};
+use crate::{AppState, schema::rate_limit_windows};
 
 const ANON_LIMIT: i32 = 1_000;
 const AUTH_LIMIT: i32 = 10_000;

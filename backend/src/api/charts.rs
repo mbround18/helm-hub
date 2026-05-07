@@ -16,10 +16,7 @@ use uuid::Uuid;
 /// Resolves `relative` against `root`, rejecting any path that would escape
 /// the root directory.  Used before every filesystem read or delete to guard
 /// against a tampered `storage_path` value in the database.
-fn safe_join(
-    root: &FsPath,
-    relative: &str,
-) -> Result<std::path::PathBuf, crate::error::AppError> {
+fn safe_join(root: &FsPath, relative: &str) -> Result<std::path::PathBuf, crate::error::AppError> {
     use std::path::Component;
     for component in FsPath::new(relative).components() {
         if matches!(component, Component::ParentDir | Component::RootDir) {
@@ -118,9 +115,9 @@ pub async fn upload_chart(
         ));
     }
     if payloads.len() > MAX_CHARTS_PER_REQUEST {
-        return Err(AppError::BadRequest(
-            format!("Maximum {MAX_CHARTS_PER_REQUEST} charts per request"),
-        ));
+        return Err(AppError::BadRequest(format!(
+            "Maximum {MAX_CHARTS_PER_REQUEST} charts per request"
+        )));
     }
     for payload in &payloads {
         if payload.len() > state.config.max_chart_file_bytes {
@@ -143,8 +140,7 @@ pub async fn upload_chart(
 
         tokio::fs::write(&temp_path, &bytes).await?;
 
-        let outcome =
-            scan_and_persist(&state, &claims.sub, &owner, &bytes, &temp_path).await;
+        let outcome = scan_and_persist(&state, &claims.sub, &owner, &bytes, &temp_path).await;
 
         if let Err(e) = tokio::fs::remove_file(&temp_path).await {
             tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove temp upload file");
@@ -155,7 +151,9 @@ pub async fn upload_chart(
             Err(e) => {
                 metrics::counter!(METRIC_UPLOAD_ERRORS_TOTAL, "reason" => "processing_error")
                     .increment(1);
-                failed.push(FailedChart { error: e.to_string() });
+                failed.push(FailedChart {
+                    error: e.to_string(),
+                });
             }
         }
     }
@@ -220,8 +218,8 @@ pub(crate) async fn scan_and_persist(
 
     let (chart_name, version, app_version, description) = parse_chart_yaml(&extracted.chart_yaml)
         .ok_or_else(|| {
-            AppError::BadRequest("Chart.yaml missing required fields (name, version)".into())
-        })?;
+        AppError::BadRequest("Chart.yaml missing required fields (name, version)".into())
+    })?;
 
     // ── Quota check (atomic reserve before touching disk) ─────────────────────
     let chart_bytes = bytes.len() as i64;
@@ -314,7 +312,11 @@ pub(crate) async fn scan_and_persist(
 
     metrics::counter!(METRIC_UPLOADS_TOTAL, "owner" => owner.to_string()).increment(1);
 
-    Ok(UploadedChart { chart: chart_name, version, owner: owner.to_string() })
+    Ok(UploadedChart {
+        chart: chart_name,
+        version,
+        owner: owner.to_string(),
+    })
 }
 
 // ── List Charts ───────────────────────────────────────────────────────────────
@@ -374,7 +376,10 @@ pub async fn list_charts(
 
     Ok(Json(
         rows.into_iter()
-            .map(|(chart, owner_username)| PublicChart { chart, owner_username })
+            .map(|(chart, owner_username)| PublicChart {
+                chart,
+                owner_username,
+            })
             .collect(),
     ))
 }
@@ -535,7 +540,8 @@ pub async fn delete_chart_version(
         FsPath::new(&state.config.charts_storage_path),
         &cv.storage_path,
     )?;
-    let freed_bytes = tokio::fs::metadata(&full_path).await
+    let freed_bytes = tokio::fs::metadata(&full_path)
+        .await
         .map(|m| m.len() as i64)
         .unwrap_or(0);
 
@@ -553,8 +559,7 @@ pub async fn delete_chart_version(
         .get_result(&mut conn)?;
 
     if remaining == 0 {
-        diesel::delete(charts::table.filter(charts::id.eq(&chart.id)))
-            .execute(&mut conn)?;
+        diesel::delete(charts::table.filter(charts::id.eq(&chart.id))).execute(&mut conn)?;
     }
 
     if freed_bytes > 0 {
@@ -592,9 +597,13 @@ pub async fn purge_chart(
 
     let mut freed_bytes: i64 = 0;
     for cv in &versions {
-        match safe_join(FsPath::new(&state.config.charts_storage_path), &cv.storage_path) {
+        match safe_join(
+            FsPath::new(&state.config.charts_storage_path),
+            &cv.storage_path,
+        ) {
             Ok(full_path) if full_path.exists() => {
-                freed_bytes += tokio::fs::metadata(&full_path).await
+                freed_bytes += tokio::fs::metadata(&full_path)
+                    .await
                     .map(|m| m.len() as i64)
                     .unwrap_or(0);
                 if let Err(e) = tokio::fs::remove_file(&full_path).await {
@@ -609,8 +618,7 @@ pub async fn purge_chart(
     diesel::delete(chart_versions::table.filter(chart_versions::chart_id.eq(&chart.id)))
         .execute(&mut conn)?;
 
-    diesel::delete(charts::table.filter(charts::id.eq(&chart.id)))
-        .execute(&mut conn)?;
+    diesel::delete(charts::table.filter(charts::id.eq(&chart.id))).execute(&mut conn)?;
 
     if freed_bytes > 0 {
         quota::release_quota(&state, &claims.sub, freed_bytes);

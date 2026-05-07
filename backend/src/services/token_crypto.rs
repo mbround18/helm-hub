@@ -17,7 +17,11 @@ pub fn encrypt_token(plaintext: &str, key: &[u8; 32]) -> Result<String, AppError
     let ciphertext = cipher
         .encrypt(&nonce, plaintext.as_bytes())
         .map_err(|e| AppError::Internal(format!("Token encryption failed: {e}")))?;
-    Ok(format!("{}:{}", hex::encode(nonce), hex::encode(ciphertext)))
+    Ok(format!(
+        "{}:{}",
+        hex::encode(nonce),
+        hex::encode(ciphertext)
+    ))
 }
 
 pub fn decrypt_token(stored: &str, key: &[u8; 32]) -> Result<String, AppError> {
@@ -25,12 +29,12 @@ pub fn decrypt_token(stored: &str, key: &[u8; 32]) -> Result<String, AppError> {
         .split_once(':')
         .ok_or_else(|| AppError::Internal("Malformed encrypted token".into()))?;
 
-    let nonce_bytes = hex::decode(nonce_hex)
-        .map_err(|_| AppError::Internal("Invalid token nonce".into()))?;
+    let nonce_bytes =
+        hex::decode(nonce_hex).map_err(|_| AppError::Internal("Invalid token nonce".into()))?;
     let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
 
-    let ct = hex::decode(ct_hex)
-        .map_err(|_| AppError::Internal("Invalid token ciphertext".into()))?;
+    let ct =
+        hex::decode(ct_hex).map_err(|_| AppError::Internal("Invalid token ciphertext".into()))?;
 
     let cipher = Aes256Gcm::new(key.into());
     let plain = cipher

@@ -1,23 +1,43 @@
-import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useAuthStore } from './stores/auth'
+import { Suspense, lazy } from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+} from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useAuthStore } from "./stores/auth";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
-})
+});
 
-const Shell = lazy(async () => ({ default: (await import('./components/layout/Shell')).Shell }))
-const Explore = lazy(async () => ({ default: (await import('./pages/Explore')).Explore }))
-const Dashboard = lazy(async () => ({ default: (await import('./pages/Dashboard')).Dashboard }))
-const Profile = lazy(async () => ({ default: (await import('./pages/Profile')).Profile }))
-const Admin = lazy(async () => ({ default: (await import('./pages/Admin')).Admin }))
-const Login = lazy(async () => ({ default: (await import('./pages/Login')).Login }))
-const Register = lazy(async () => ({ default: (await import('./pages/Register')).Register }))
+const Shell = lazy(async () => ({
+  default: (await import("./components/layout/Shell")).Shell,
+}));
+const Explore = lazy(async () => ({
+  default: (await import("./pages/Explore")).Explore,
+}));
+const Dashboard = lazy(async () => ({
+  default: (await import("./pages/Dashboard")).Dashboard,
+}));
+const Profile = lazy(async () => ({
+  default: (await import("./pages/Profile")).Profile,
+}));
+const Admin = lazy(async () => ({
+  default: (await import("./pages/Admin")).Admin,
+}));
+const Login = lazy(async () => ({
+  default: (await import("./pages/Login")).Login,
+}));
+const Register = lazy(async () => ({
+  default: (await import("./pages/Register")).Register,
+}));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
-  return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />
+  const { isAuthenticated } = useAuthStore();
+  return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
 function AuthPageFallback() {
@@ -32,7 +52,7 @@ function AuthPageFallback() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function ShellFallback() {
@@ -56,7 +76,7 @@ function ShellFallback() {
         </div>
       </main>
     </div>
-  )
+  );
 }
 
 function PageFallback() {
@@ -73,7 +93,7 @@ function PageFallback() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function ShellLayout() {
@@ -85,7 +105,7 @@ function ShellLayout() {
         </Suspense>
       </Shell>
     </Suspense>
-  )
+  );
 }
 
 export default function App() {
@@ -139,5 +159,5 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
-  )
+  );
 }

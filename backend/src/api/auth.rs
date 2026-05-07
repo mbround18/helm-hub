@@ -1,12 +1,13 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use chrono::{Timelike, Utc};
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
+    AppState,
     auth::{
-        jwt::{encode_jwt, Claims},
+        jwt::{Claims, encode_jwt},
         password::{hash_password, verify_password},
         totp::{generate_secret, provisioning_uri, verify_code},
     },
@@ -14,7 +15,6 @@ use crate::{
     error::AppError,
     schema::{rate_limit_windows, users},
     services::settings,
-    AppState,
 };
 
 // ── Input validation ──────────────────────────────────────────────────────────
@@ -169,7 +169,9 @@ pub async fn register(
     {
         let mut conn = state.db.get()?;
         if !settings::signup_enabled(&mut conn) {
-            return Err(AppError::Forbidden("Registration is currently disabled".into()));
+            return Err(AppError::Forbidden(
+                "Registration is currently disabled".into(),
+            ));
         }
     }
     validate_username(&req.username)?;
@@ -247,9 +249,7 @@ pub async fn login(
 
     // Auto-promote the bootstrap admin on their first login so the DB stays
     // consistent and the returned user object / JWT both carry is_admin=true.
-    if !user.is_admin()
-        && state.config.admin_username.as_deref() == Some(user.username.as_str())
-    {
+    if !user.is_admin() && state.config.admin_username.as_deref() == Some(user.username.as_str()) {
         let _ = diesel::update(users::table.filter(users::id.eq(&user.id)))
             .set((
                 crate::schema::users::is_admin.eq(1),
@@ -349,5 +349,7 @@ pub async fn totp_enable(
         })
         .execute(&mut conn)?;
 
-    Ok(Json(serde_json::json!({ "message": "TOTP enabled successfully" })))
+    Ok(Json(
+        serde_json::json!({ "message": "TOTP enabled successfully" }),
+    ))
 }

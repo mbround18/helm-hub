@@ -1,4 +1,4 @@
-use base32::{encode, Alphabet};
+use base32::{Alphabet, encode};
 use rand_core::{OsRng, RngCore};
 use totp_rs::{Algorithm, Secret, TOTP};
 
@@ -12,15 +12,25 @@ pub fn generate_secret() -> String {
 }
 
 /// Build the `otpauth://` provisioning URI shown in QR codes.
-pub fn provisioning_uri(username: &str, secret_b32: &str, issuer: &str) -> Result<String, AppError> {
+pub fn provisioning_uri(
+    username: &str,
+    secret_b32: &str,
+    issuer: &str,
+) -> Result<String, AppError> {
     let totp = build_totp(username, secret_b32, issuer)?;
     Ok(totp.get_url())
 }
 
 /// Verify a 6-digit TOTP code against the stored secret.
-pub fn verify_code(secret_b32: &str, code: &str, username: &str, issuer: &str) -> Result<bool, AppError> {
+pub fn verify_code(
+    secret_b32: &str,
+    code: &str,
+    username: &str,
+    issuer: &str,
+) -> Result<bool, AppError> {
     let totp = build_totp(username, secret_b32, issuer)?;
-    totp.check_current(code).map_err(|e| AppError::Internal(e.to_string()))
+    totp.check_current(code)
+        .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 fn build_totp(username: &str, secret_b32: &str, issuer: &str) -> Result<TOTP, AppError> {

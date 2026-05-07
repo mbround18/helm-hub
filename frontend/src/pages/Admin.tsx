@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,7 +9,7 @@ import {
   createColumnHelper,
   flexRender,
   type SortingState,
-} from '@tanstack/react-table'
+} from "@tanstack/react-table";
 import {
   Settings,
   Users,
@@ -26,44 +26,48 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-} from 'lucide-react'
-import { adminApi, settingsApi, type AdminUser } from '../lib/api'
-import { useAuthStore } from '../stores/auth'
-import { useSettings } from '../hooks/useSettings'
-import { Navigate } from 'react-router-dom'
+} from "lucide-react";
+import { adminApi, settingsApi, type AdminUser } from "../lib/api";
+import { useAuthStore } from "../stores/auth";
+import { useSettings } from "../hooks/useSettings";
+import { Navigate } from "react-router-dom";
 
 function fmtBytes(b: number) {
-  if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`
-  if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`
-  if (b >= 1e3) return `${(b / 1e3).toFixed(1)} KB`
-  return `${b} B`
+  if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
+  if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
+  if (b >= 1e3) return `${(b / 1e3).toFixed(1)} KB`;
+  return `${b} B`;
 }
 
 // ── Settings panel ────────────────────────────────────────────────────────────
 
 function SettingsPanel() {
-  const settings = useSettings()
-  const qc = useQueryClient()
-  const [appName, setAppName] = useState(settings.app_name)
-  const [logoUrl, setLogoUrl] = useState(settings.logo_url)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState('')
+  const settings = useSettings();
+  const qc = useQueryClient();
+  const [appName, setAppName] = useState(settings.app_name);
+  const [logoUrl, setLogoUrl] = useState(settings.logo_url);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
 
   const saveMutation = useMutation({
-    mutationFn: (body: Parameters<typeof settingsApi.update>[0]) => settingsApi.update(body),
+    mutationFn: (body: Parameters<typeof settingsApi.update>[0]) =>
+      settingsApi.update(body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['app-settings'] })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
+      qc.invalidateQueries({ queryKey: ["app-settings"] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
     },
-    onError: (err: any) => setError(err?.response?.data?.error ?? 'Failed to save'),
-  })
+    onError: (err: any) =>
+      setError(err?.response?.data?.error ?? "Failed to save"),
+  });
 
   const toggleSignup = useMutation({
-    mutationFn: () => settingsApi.update({ signup_enabled: !settings.signup_enabled }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['app-settings'] }),
-    onError: (err: any) => setError(err?.response?.data?.error ?? 'Failed to update'),
-  })
+    mutationFn: () =>
+      settingsApi.update({ signup_enabled: !settings.signup_enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["app-settings"] }),
+    onError: (err: any) =>
+      setError(err?.response?.data?.error ?? "Failed to update"),
+  });
 
   return (
     <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5">
@@ -86,7 +90,9 @@ function SettingsPanel() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="block text-xs font-medium text-gray-400">App name</label>
+          <label className="block text-xs font-medium text-gray-400">
+            App name
+          </label>
           <input
             value={appName}
             onChange={(e) => setAppName(e.target.value)}
@@ -96,7 +102,8 @@ function SettingsPanel() {
         </div>
         <div className="space-y-2">
           <label className="block text-xs font-medium text-gray-400">
-            Logo URL <span className="text-gray-600">(blank = default icon)</span>
+            Logo URL{" "}
+            <span className="text-gray-600">(blank = default icon)</span>
           </label>
           <input
             value={logoUrl}
@@ -109,153 +116,189 @@ function SettingsPanel() {
 
       <div className="flex items-center justify-between pt-1">
         <button
-          onClick={() => { setError(''); saveMutation.mutate({ app_name: appName, logo_url: logoUrl }) }}
+          onClick={() => {
+            setError("");
+            saveMutation.mutate({ app_name: appName, logo_url: logoUrl });
+          }}
           disabled={saveMutation.isPending}
           className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
-          {saveMutation.isPending ? 'Saving…' : 'Save changes'}
+          {saveMutation.isPending ? "Saving…" : "Save changes"}
         </button>
 
         <div className="flex items-center gap-3">
           <div className="text-right">
             <p className="text-sm font-medium text-white">User registration</p>
             <p className="text-xs text-gray-500">
-              {settings.signup_enabled ? 'Open — anyone can sign up' : 'Closed — invite-only'}
+              {settings.signup_enabled
+                ? "Open — anyone can sign up"
+                : "Closed — invite-only"}
             </p>
           </div>
           <button
-            onClick={() => { setError(''); toggleSignup.mutate() }}
+            onClick={() => {
+              setError("");
+              toggleSignup.mutate();
+            }}
             disabled={toggleSignup.isPending}
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-              settings.signup_enabled ? 'bg-violet-600' : 'bg-gray-700'
+              settings.signup_enabled ? "bg-violet-600" : "bg-gray-700"
             } disabled:opacity-50`}
           >
-            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-              settings.signup_enabled ? 'translate-x-5' : 'translate-x-0'
-            }`} />
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                settings.signup_enabled ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
           </button>
         </div>
       </div>
     </section>
-  )
+  );
 }
 
 // ── Users table ───────────────────────────────────────────────────────────────
 
-const columnHelper = createColumnHelper<AdminUser>()
+const columnHelper = createColumnHelper<AdminUser>();
 
-function SortIcon({ sorted }: { sorted: false | 'asc' | 'desc' }) {
-  if (!sorted) return <ArrowUpDown className="w-3.5 h-3.5 text-gray-600 shrink-0" />
-  return sorted === 'asc'
-    ? <ArrowUp className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-    : <ArrowDown className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+function SortIcon({ sorted }: { sorted: false | "asc" | "desc" }) {
+  if (!sorted)
+    return <ArrowUpDown className="w-3.5 h-3.5 text-gray-600 shrink-0" />;
+  return sorted === "asc" ? (
+    <ArrowUp className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+  ) : (
+    <ArrowDown className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+  );
 }
 
 function UsersPanel({ currentUserId }: { currentUserId: string }) {
-  const qc = useQueryClient()
-  const [globalFilter, setGlobalFilter] = useState('')
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [actionError, setActionError] = useState('')
+  const qc = useQueryClient();
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [actionError, setActionError] = useState("");
 
   const { data: users = [], isLoading } = useQuery({
-    queryKey: ['admin-users'],
+    queryKey: ["admin-users"],
     queryFn: () => adminApi.listUsers().then((r) => r.data),
-  })
+  });
 
   const mutate = (fn: () => Promise<unknown>) => {
-    setActionError('')
+    setActionError("");
     fn()
-      .then(() => qc.invalidateQueries({ queryKey: ['admin-users'] }))
-      .catch((err: any) => setActionError(err?.response?.data?.error ?? 'Action failed'))
-  }
+      .then(() => qc.invalidateQueries({ queryKey: ["admin-users"] }))
+      .catch((err: any) =>
+        setActionError(err?.response?.data?.error ?? "Action failed"),
+      );
+  };
 
-  const columns = useMemo(() => [
-    columnHelper.accessor('username', {
-      header: 'Username',
-      cell: (info) => {
-        const u = info.row.original
-        return (
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-white">{u.username}</span>
-            {u.id === currentUserId && <span className="text-xs text-gray-600">(you)</span>}
-            {u.is_admin !== 0 && (
-              <span className="text-xs bg-violet-950/60 text-violet-400 border border-violet-800/40 px-1.5 py-0.5 rounded">
-                admin
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("username", {
+        header: "Username",
+        cell: (info) => {
+          const u = info.row.original;
+          return (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-white">
+                {u.username}
               </span>
-            )}
-            {u.banned_at && (
-              <span className="text-xs bg-red-950/60 text-red-400 border border-red-800/40 px-1.5 py-0.5 rounded">
-                banned
-              </span>
-            )}
-          </div>
-        )
-      },
-    }),
-    columnHelper.accessor('email', {
-      header: 'Email',
-      cell: (info) => <span className="text-sm text-gray-400">{info.getValue()}</span>,
-    }),
-    columnHelper.accessor('storage_usage_bytes', {
-      header: 'Storage',
-      cell: (info) => {
-        const u = info.row.original
-        return (
-          <span className="flex items-center gap-1 text-sm text-gray-400">
-            <HardDrive className="w-3.5 h-3.5 text-gray-600 shrink-0" />
-            {fmtBytes(info.getValue())}
-            {u.storage_quota_bytes != null && (
-              <span className="text-gray-600">/ {fmtBytes(u.storage_quota_bytes)}</span>
-            )}
+              {u.id === currentUserId && (
+                <span className="text-xs text-gray-600">(you)</span>
+              )}
+              {u.is_admin !== 0 && (
+                <span className="text-xs bg-violet-950/60 text-violet-400 border border-violet-800/40 px-1.5 py-0.5 rounded">
+                  admin
+                </span>
+              )}
+              {u.banned_at && (
+                <span className="text-xs bg-red-950/60 text-red-400 border border-red-800/40 px-1.5 py-0.5 rounded">
+                  banned
+                </span>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("email", {
+        header: "Email",
+        cell: (info) => (
+          <span className="text-sm text-gray-400">{info.getValue()}</span>
+        ),
+      }),
+      columnHelper.accessor("storage_usage_bytes", {
+        header: "Storage",
+        cell: (info) => {
+          const u = info.row.original;
+          return (
+            <span className="flex items-center gap-1 text-sm text-gray-400">
+              <HardDrive className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+              {fmtBytes(info.getValue())}
+              {u.storage_quota_bytes != null && (
+                <span className="text-gray-600">
+                  / {fmtBytes(u.storage_quota_bytes)}
+                </span>
+              )}
+            </span>
+          );
+        },
+      }),
+      columnHelper.accessor("created_at", {
+        header: "Joined",
+        cell: (info) => (
+          <span className="text-sm text-gray-500">
+            {new Date(info.getValue()).toLocaleDateString()}
           </span>
-        )
-      },
-    }),
-    columnHelper.accessor('created_at', {
-      header: 'Joined',
-      cell: (info) => (
-        <span className="text-sm text-gray-500">
-          {new Date(info.getValue()).toLocaleDateString()}
-        </span>
-      ),
-    }),
-    columnHelper.display({
-      id: 'actions',
-      header: '',
-      cell: (info) => {
-        const u = info.row.original
-        if (u.id === currentUserId) return null
-        return (
-          <div className="flex items-center gap-1 justify-end">
-            {u.is_admin === 0 && (
+        ),
+      }),
+      columnHelper.display({
+        id: "actions",
+        header: "",
+        cell: (info) => {
+          const u = info.row.original;
+          if (u.id === currentUserId) return null;
+          return (
+            <div className="flex items-center gap-1 justify-end">
+              {u.is_admin === 0 && (
+                <ActionButton
+                  icon={<ChevronUp className="w-3.5 h-3.5" />}
+                  label="Promote"
+                  onClick={() => mutate(() => adminApi.promoteUser(u.id))}
+                  color="violet"
+                />
+              )}
               <ActionButton
-                icon={<ChevronUp className="w-3.5 h-3.5" />}
-                label="Promote"
-                onClick={() => mutate(() => adminApi.promoteUser(u.id))}
-                color="violet"
-              />
-            )}
-            <ActionButton
-              icon={u.banned_at ? <Shield className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
-              label={u.banned_at ? 'Unban' : 'Ban'}
-              onClick={() => mutate(() => adminApi.banUser(u.id))}
-              color="amber"
-            />
-            <ActionButton
-              icon={<Trash2 className="w-3.5 h-3.5" />}
-              label="Purge"
-              onClick={() => {
-                if (confirm(`Permanently delete '${u.username}' and all their data?`)) {
-                  mutate(() => adminApi.purgeUser(u.id))
+                icon={
+                  u.banned_at ? (
+                    <Shield className="w-3.5 h-3.5" />
+                  ) : (
+                    <ShieldOff className="w-3.5 h-3.5" />
+                  )
                 }
-              }}
-              color="red"
-            />
-          </div>
-        )
-      },
-    }),
-  ], [currentUserId])
+                label={u.banned_at ? "Unban" : "Ban"}
+                onClick={() => mutate(() => adminApi.banUser(u.id))}
+                color="amber"
+              />
+              <ActionButton
+                icon={<Trash2 className="w-3.5 h-3.5" />}
+                label="Purge"
+                onClick={() => {
+                  if (
+                    confirm(
+                      `Permanently delete '${u.username}' and all their data?`,
+                    )
+                  ) {
+                    mutate(() => adminApi.purgeUser(u.id));
+                  }
+                }}
+                color="red"
+              />
+            </div>
+          );
+        },
+      }),
+    ],
+    [currentUserId],
+  );
 
   const table = useReactTable({
     data: users,
@@ -268,7 +311,7 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize: 20 } },
-  })
+  });
 
   return (
     <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -315,11 +358,17 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
                         onClick={header.column.getToggleSortingHandler()}
                         className="flex items-center gap-1.5 hover:text-gray-300 transition-colors"
                       >
-                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )}
                         <SortIcon sorted={header.column.getIsSorted()} />
                       </button>
                     ) : (
-                      flexRender(header.column.columnDef.header, header.getContext())
+                      flexRender(
+                        header.column.columnDef.header,
+                        header.getContext(),
+                      )
                     )}
                   </th>
                 ))}
@@ -339,8 +388,13 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="px-5 py-12 text-center text-sm text-gray-600">
-                  {globalFilter ? `No users matching "${globalFilter}"` : 'No users found'}
+                <td
+                  colSpan={columns.length}
+                  className="px-5 py-12 text-center text-sm text-gray-600"
+                >
+                  {globalFilter
+                    ? `No users matching "${globalFilter}"`
+                    : "No users found"}
                 </td>
               </tr>
             ) : (
@@ -351,7 +405,10 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
                 >
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-5 py-3.5">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </td>
                   ))}
                 </tr>
@@ -365,7 +422,8 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
       {table.getPageCount() > 1 && (
         <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between text-sm">
           <span className="text-gray-500">
-            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+            Page {table.getState().pagination.pageIndex + 1} of{" "}
+            {table.getPageCount()}
           </span>
           <div className="flex items-center gap-1">
             <PaginationButton
@@ -382,22 +440,25 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
         </div>
       )}
     </section>
-  )
+  );
 }
 
 function ActionButton({
-  icon, label, onClick, color,
+  icon,
+  label,
+  onClick,
+  color,
 }: {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  color: 'violet' | 'amber' | 'red'
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  color: "violet" | "amber" | "red";
 }) {
   const colors = {
-    violet: 'text-violet-400 hover:bg-violet-950/50 hover:text-violet-300',
-    amber: 'text-amber-400 hover:bg-amber-950/50 hover:text-amber-300',
-    red: 'text-red-400 hover:bg-red-950/50 hover:text-red-300',
-  }
+    violet: "text-violet-400 hover:bg-violet-950/50 hover:text-violet-300",
+    amber: "text-amber-400 hover:bg-amber-950/50 hover:text-amber-300",
+    red: "text-red-400 hover:bg-red-950/50 hover:text-red-300",
+  };
   return (
     <button
       onClick={onClick}
@@ -407,15 +468,17 @@ function ActionButton({
       {icon}
       {label}
     </button>
-  )
+  );
 }
 
 function PaginationButton({
-  onClick, disabled, icon,
+  onClick,
+  disabled,
+  icon,
 }: {
-  onClick: () => void
-  disabled: boolean
-  icon: React.ReactNode
+  onClick: () => void;
+  disabled: boolean;
+  icon: React.ReactNode;
 }) {
   return (
     <button
@@ -425,16 +488,16 @@ function PaginationButton({
     >
       {icon}
     </button>
-  )
+  );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function Admin() {
-  const { user } = useAuthStore()
+  const { user } = useAuthStore();
 
   if (!user || user.is_admin === 0) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/" replace />;
   }
 
   return (
@@ -443,5 +506,5 @@ export function Admin() {
       <SettingsPanel />
       <UsersPanel currentUserId={user.id} />
     </div>
-  )
+  );
 }

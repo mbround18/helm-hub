@@ -9,11 +9,11 @@ use diesel::prelude::*;
 
 use crate::{
     AppState,
+    auth::jwt::Claims,
     auth::{hash_api_token, jwt::decode_jwt},
     db::models::{ApiToken, TouchApiToken, User},
     error::AppError,
     schema::{api_tokens, users},
-    auth::jwt::Claims,
 };
 
 /// Validates a `Bearer` token from the `Authorization` header.
@@ -33,7 +33,9 @@ pub async fn require_auth(
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| AppError::Unauthorized("Missing or malformed Authorization header".into()))?;
+        .ok_or_else(|| {
+            AppError::Unauthorized("Missing or malformed Authorization header".into())
+        })?;
 
     let claims = if raw.starts_with("hhub_") {
         resolve_api_token(&state, raw)?
@@ -67,7 +69,9 @@ fn resolve_api_token(state: &AppState, raw_token: &str) -> Result<Claims, AppErr
         .map_err(|_| AppError::Internal("Malformed token expiry in database".into()))?;
 
     if Utc::now() > expires_at {
-        return Err(AppError::Unauthorized("Invalid or expired API token".into()));
+        return Err(AppError::Unauthorized(
+            "Invalid or expired API token".into(),
+        ));
     }
 
     let user: User = users::table
@@ -82,7 +86,9 @@ fn resolve_api_token(state: &AppState, raw_token: &str) -> Result<Claims, AppErr
     tokio::spawn(async move {
         if let Ok(mut c) = pool.get() {
             let _ = diesel::update(api_tokens::table.filter(api_tokens::id.eq(&token_id)))
-                .set(TouchApiToken { last_used_at: Some(Utc::now().to_rfc3339()) })
+                .set(TouchApiToken {
+                    last_used_at: Some(Utc::now().to_rfc3339()),
+                })
                 .execute(&mut c);
         }
     });

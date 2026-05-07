@@ -8,10 +8,10 @@
 ///   GET /k8s/readyz   — readiness probe (can the process serve traffic?)
 ///   GET /k8s/metrics  — Prometheus text exposition format
 use axum::{
+    Json,
     extract::State,
     http::{StatusCode, header},
     response::IntoResponse,
-    Json,
 };
 use serde_json::json;
 use tokio::{
@@ -46,9 +46,7 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
     }
 
     // ── ClamAV daemon socket ──────────────────────────────────────────────────
-    if state.config.clamav_enabled
-        && !ping_clamd(&state.config.clamd_socket).await
-    {
+    if state.config.clamav_enabled && !ping_clamd(&state.config.clamd_socket).await {
         tracing::warn!(socket = %state.config.clamd_socket, "readyz: clamd unreachable");
         failures.push("clamd_socket_unreachable");
     }

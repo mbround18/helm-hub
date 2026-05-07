@@ -29,5 +29,7 @@ pub fn set(conn: &mut DbConn, key: &str, value: &str) -> Result<(), AppError> {
 }
 
 pub fn signup_enabled(conn: &mut DbConn) -> bool {
-    get(conn, "signup_enabled").map(|v| v != "false").unwrap_or(true)
+    get(conn, "signup_enabled")
+        .map(|v| v != "false")
+        .unwrap_or(true)
 }

@@ -242,8 +242,11 @@ async fn download_and_import(
     let bytes = Bytes::from(bytes_vec);
 
     // Write to a temp file (required by scan_and_persist for ClamAV).
-    let temp_path = std::path::Path::new(&state.config.temp_upload_dir)
-        .join(format!("gh-sync-{}-{}.tgz", Uuid::new_v4(), asset_name));
+    let temp_path = std::path::Path::new(&state.config.temp_upload_dir).join(format!(
+        "gh-sync-{}-{}.tgz",
+        Uuid::new_v4(),
+        asset_name
+    ));
 
     if let Err(e) = tokio::fs::write(&temp_path, &bytes).await {
         return make_failed(format!("Failed to write temp file: {e}"));
