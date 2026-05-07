@@ -117,6 +117,7 @@ async fn main() {
 
     // ── Public routes — rate limited, no auth required ────────────────────────
     let public_routes = Router::new()
+        .route("/api/settings", get(api::settings::get_settings))
         .route("/api/auth/register", post(api::auth::register))
         .route("/api/auth/login", post(api::auth::login))
         .route(
@@ -155,6 +156,10 @@ async fn main() {
         .route(
             "/api/admin/charts/{owner}/{chart_name}",
             delete(api::admin::delete_any_chart),
+        )
+        .route(
+            "/api/admin/settings",
+            axum::routing::put(api::admin::update_settings),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

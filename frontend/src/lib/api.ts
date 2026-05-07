@@ -200,3 +200,41 @@ export const tokensApi = {
 
   revoke: (id: string) => api.delete(`/tokens/${id}`),
 }
+
+// ── App Settings ──────────────────────────────────────────────────────────────
+
+export interface AppSettings {
+  app_name: string
+  logo_url: string
+  signup_enabled: boolean
+}
+
+export const settingsApi = {
+  get: () => api.get<AppSettings>('/settings'),
+  update: (body: Partial<{ app_name: string; logo_url: string; signup_enabled: boolean }>) =>
+    api.put('/admin/settings', body),
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export interface AdminUser {
+  id: string
+  username: string
+  email: string
+  is_admin: number
+  banned_at: string | null
+  storage_usage_bytes: number
+  storage_quota_bytes: number | null
+  created_at: string
+}
+
+export const adminApi = {
+  listUsers: () => api.get<AdminUser[]>('/admin/users'),
+  promoteUser: (id: string) => api.post(`/admin/users/${id}/promote`),
+  banUser: (id: string) => api.post(`/admin/users/${id}/ban`),
+  purgeUser: (id: string) => api.delete(`/admin/users/${id}`),
+  setQuota: (id: string, quota_bytes: number | null) =>
+    api.put(`/admin/users/${id}/quota`, { quota_bytes }),
+  deleteChart: (owner: string, chartName: string) =>
+    api.delete(`/admin/charts/${owner}/${chartName}`),
+}

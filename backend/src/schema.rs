@@ -114,6 +114,14 @@ diesel::joinable!(github_connections -> users (user_id));
 diesel::joinable!(github_repos -> users (user_id));
 diesel::joinable!(github_repos -> github_connections (github_connection_id));
 
+diesel::table! {
+    app_settings (key) {
+        key -> Text,
+        value -> Text,
+        updated_at -> Text,
+    }
+}
+
 diesel::joinable!(admin_audit_log -> users (admin_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -125,4 +133,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     github_repos,
     rate_limit_windows,
     admin_audit_log,
+    app_settings,
 );

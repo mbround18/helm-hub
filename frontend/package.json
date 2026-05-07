@@ -12,6 +12,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-query": "^5.100.9",
+    "@tanstack/react-table": "^8.21.3",
     "axios": "^1.16.0",
     "clsx": "^2.1.1",
     "flexsearch": "^0.8.212",

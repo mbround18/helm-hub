@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import { chartsApi, type PublicChart } from '../lib/api'
 import { ChartDetail, fmtDownloads } from '../components/ChartDetail'
+import { AppLogo } from '../components/AppLogo'
+import { useSettings } from '../hooks/useSettings'
 import clsx from 'clsx'
 
 // ── FlexSearch setup ──────────────────────────────────────────────────────────
@@ -25,6 +27,7 @@ function buildIndex(charts: PublicChart[]): FlexDocument<any> {
   const idx = new FlexDocument<any>({
     document: {
       id: 'id',
+      store: true,  // required for enrich:true to populate doc in search results
       index: [
         { field: 'name',           tokenize: 'forward', resolution: 9 },
         { field: 'owner_username', tokenize: 'forward', resolution: 6 },
@@ -116,6 +119,7 @@ export function Explore() {
   const [focused, setFocused] = useState(false)
   const [selected, setSelected] = useState<PublicChart | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const { app_name } = useSettings()
 
   // Load all charts (sorted by downloads) for Fuse.js index
   const { data: allCharts = [], isLoading } = useQuery({
@@ -213,10 +217,10 @@ export function Explore() {
       <div className={clsx('transition-all duration-300 text-center px-6', hasQuery ? 'pt-10 pb-6' : 'pt-24 pb-10')}>
         {!hasQuery && (
           <>
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-950/60 border border-violet-800/50 mb-5">
-              <Package className="w-8 h-8 text-violet-400" />
+            <div className="flex justify-center mb-5">
+              <AppLogo size="lg" showName={false} className="text-violet-400 w-16 h-16 rounded-2xl bg-violet-950/60 border border-violet-800/50 justify-center" />
             </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Helm Hub</h1>
+            <h1 className="text-3xl font-bold text-white mb-2">{app_name}</h1>
             <p className="text-gray-400 text-sm mb-8">Discover, install, and share Helm charts</p>
           </>
         )}

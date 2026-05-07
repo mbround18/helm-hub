@@ -11,6 +11,7 @@ const Shell = lazy(async () => ({ default: (await import('./components/layout/Sh
 const Explore = lazy(async () => ({ default: (await import('./pages/Explore')).Explore }))
 const Dashboard = lazy(async () => ({ default: (await import('./pages/Dashboard')).Dashboard }))
 const Profile = lazy(async () => ({ default: (await import('./pages/Profile')).Profile }))
+const Admin = lazy(async () => ({ default: (await import('./pages/Admin')).Admin }))
 const Login = lazy(async () => ({ default: (await import('./pages/Login')).Login }))
 const Register = lazy(async () => ({ default: (await import('./pages/Register')).Register }))
 
@@ -123,6 +124,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute>
+                  <Admin />
                 </ProtectedRoute>
               }
             />

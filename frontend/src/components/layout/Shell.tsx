@@ -1,6 +1,7 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
-import { Package, LogOut, User, LayoutDashboard, Search } from 'lucide-react'
+import { LogOut, User, LayoutDashboard, Search, Settings } from 'lucide-react'
 import { useAuthStore } from '../../stores/auth'
+import { AppLogo } from '../AppLogo'
 import clsx from 'clsx'
 
 interface ShellProps {
@@ -16,18 +17,19 @@ export function Shell({ children }: ShellProps) {
     navigate('/login')
   }
 
+  const isAdmin = (user?.is_admin ?? 0) !== 0
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex">
       {/* Sidebar */}
-      <aside className="w-60 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-        <div className="p-5 border-b border-gray-800">
-          <Link to="/" className="flex items-center gap-2 text-violet-400 font-semibold text-lg">
-            <Package className="w-5 h-5" />
-            Helm Hub
+      <aside className="w-60 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col h-screen sticky top-0">
+        <div className="p-5 border-b border-gray-800 shrink-0">
+          <Link to="/" className="text-violet-400">
+            <AppLogo size="md" />
           </Link>
         </div>
 
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           <SidebarLink to="/" icon={<Search className="w-4 h-4" />} label="Explore" end />
           {isAuthenticated() && (
             <SidebarLink
@@ -36,9 +38,16 @@ export function Shell({ children }: ShellProps) {
               label="My Charts"
             />
           )}
+          {isAdmin && (
+            <SidebarLink
+              to="/admin"
+              icon={<Settings className="w-4 h-4" />}
+              label="Admin"
+            />
+          )}
         </nav>
 
-        <div className="p-3 border-t border-gray-800">
+        <div className="p-3 border-t border-gray-800 shrink-0">
           {isAuthenticated() ? (
             <div className="space-y-1">
               <SidebarLink

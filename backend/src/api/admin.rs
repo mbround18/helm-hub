@@ -19,6 +19,7 @@ use crate::{
     db::models::{AdminUpdateUser, NewAdminAuditLog, User},
     error::AppError,
     schema::{admin_audit_log, chart_versions, charts, users},
+    services::settings,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -290,6 +291,55 @@ pub async fn set_user_quota(
         &id,
         Some(serde_json::json!({ "quota_bytes": body.quota_bytes })),
     )?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── PUT /api/admin/settings ───────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct UpdateSettingsBody {
+    pub app_name: Option<String>,
+    pub logo_url: Option<String>,
+    pub signup_enabled: Option<bool>,
+}
+
+pub async fn update_settings(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(body): Json<UpdateSettingsBody>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.get()?;
+
+    if let Some(ref name) = body.app_name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || trimmed.len() > 64 {
+            return Err(AppError::BadRequest("app_name must be 1–64 characters".into()));
+        }
+        settings::set(&mut conn, "app_name", trimmed)?;
+    }
+
+    if let Some(ref url) = body.logo_url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("https://")
+            && !trimmed.starts_with("http://")
+        {
+            return Err(AppError::BadRequest("logo_url must be an http/https URL or empty".into()));
+        }
+        settings::set(&mut conn, "logo_url", trimmed)?;
+    }
+
+    if let Some(enabled) = body.signup_enabled {
+        settings::set(&mut conn, "signup_enabled", if enabled { "true" } else { "false" })?;
+    }
+
+    let meta = serde_json::json!({
+        "app_name": body.app_name,
+        "logo_url": body.logo_url,
+        "signup_enabled": body.signup_enabled,
+    });
+    audit(&mut conn, &claims.sub, "update_settings", "settings", "global", Some(meta))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

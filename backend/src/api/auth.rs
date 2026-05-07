@@ -13,6 +13,7 @@ use crate::{
     db::models::{NewUser, UpdateUser, User},
     error::AppError,
     schema::{rate_limit_windows, users},
+    services::settings,
     AppState,
 };
 
@@ -165,6 +166,12 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, AppError> {
+    {
+        let mut conn = state.db.get()?;
+        if !settings::signup_enabled(&mut conn) {
+            return Err(AppError::Forbidden("Registration is currently disabled".into()));
+        }
+    }
     validate_username(&req.username)?;
     validate_email(&req.email)?;
     if req.password.len() < 8 {
@@ -220,7 +227,7 @@ pub async fn login(
 
     // Use a constant-time-friendly error: same message for "no such user" and
     // "wrong password" to prevent username enumeration.
-    let user: User = users::table
+    let mut user: User = users::table
         .filter(users::username.eq(&req.username))
         .select(User::as_select())
         .first(&mut conn)
@@ -236,6 +243,20 @@ pub async fn login(
 
     if user.is_banned() {
         return Err(AppError::Forbidden("Account suspended".into()));
+    }
+
+    // Auto-promote the bootstrap admin on their first login so the DB stays
+    // consistent and the returned user object / JWT both carry is_admin=true.
+    if !user.is_admin()
+        && state.config.admin_username.as_deref() == Some(user.username.as_str())
+    {
+        let _ = diesel::update(users::table.filter(users::id.eq(&user.id)))
+            .set((
+                crate::schema::users::is_admin.eq(1),
+                crate::schema::users::updated_at.eq(chrono::Utc::now().to_rfc3339()),
+            ))
+            .execute(&mut conn);
+        user.is_admin = 1;
     }
 
     if user.is_totp_enabled() {

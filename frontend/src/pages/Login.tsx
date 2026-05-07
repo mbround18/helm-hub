@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '../lib/api'
 import { useAuthStore } from '../stores/auth'
-import { Package, AlertCircle } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
+import { AppLogo } from '../components/AppLogo'
+import { useSettings } from '../hooks/useSettings'
 
 export function Login() {
   const [form, setForm] = useState({ username: '', password: '', totp_code: '' })
@@ -11,6 +13,7 @@ export function Login() {
   const [loading, setLoading] = useState(false)
   const { setAuth } = useAuthStore()
   const navigate = useNavigate()
+  const { signup_enabled } = useSettings()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -36,9 +39,8 @@ export function Login() {
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-2 text-violet-400 mb-8">
-          <Package className="w-6 h-6" />
-          <span className="text-xl font-semibold">Helm Hub</span>
+        <div className="flex items-center justify-center text-violet-400 mb-8">
+          <AppLogo size="md" />
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
@@ -85,12 +87,14 @@ export function Login() {
             </button>
           </form>
 
-          <p className="text-center text-sm text-gray-500 mt-5">
-            No account?{' '}
-            <Link to="/register" className="text-violet-400 hover:text-violet-300">
-              Register
-            </Link>
-          </p>
+          {signup_enabled && (
+            <p className="text-center text-sm text-gray-500 mt-5">
+              No account?{' '}
+              <Link to="/register" className="text-violet-400 hover:text-violet-300">
+                Register
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>
