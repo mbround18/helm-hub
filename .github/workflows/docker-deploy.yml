@@ -20,7 +20,5 @@ jobs:
       dockerhub_username: ${{ vars.DOCKER_USERNAME }}
       context: "."
       dockerfile: "./Dockerfile"
-      # Current runtime target is amd64 only.
-      platforms: "linux/amd64"
     secrets:
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
