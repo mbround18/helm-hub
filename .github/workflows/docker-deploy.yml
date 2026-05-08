@@ -1,0 +1,27 @@
+name: Docker Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+jobs:
+  docker_release:
+    uses: mbround18/gh-reusable/.github/workflows/docker-release.yaml@v0.0.6
+    with:
+      image: ${{ vars.DOCKER_USERNAME }}/helm-hub
+      dockerhub_username: ${{ vars.DOCKER_USERNAME }}
+      context: "."
+      dockerfile: "./Dockerfile"
+      platforms: "linux/amd64"
+    secrets:
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
