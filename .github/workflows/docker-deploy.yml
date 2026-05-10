@@ -14,7 +14,7 @@ jobs:
   docker_release:
     # gh-reusable docker-release.yaml @ v0.0.6:
     # https://github.com/mbround18/gh-reusable/releases/tag/v0.0.6
-    uses: mbround18/gh-reusable/.github/workflows/docker-release.yaml@main
+    uses: mbround18/gh-reusable/.github/workflows/docker-release.yaml@dagger/io
     with:
       image: ${{ vars.DOCKER_USERNAME }}/helm-hub
       dockerhub_username: ${{ vars.DOCKER_USERNAME }}
