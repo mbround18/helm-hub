@@ -46,6 +46,10 @@ pub struct Config {
     /// 32-byte key for AES-256-GCM encryption of stored GitHub access tokens.
     /// Derived from JWT_SECRET when TOKEN_ENCRYPTION_KEY is not set.
     pub token_encryption_key: [u8; 32],
+
+    // ── Observability ─────────────────────────────────────────────────────────
+    /// Internal OTLP collector endpoint for backend traces/metrics.
+    pub otel_collector_endpoint: Option<String>,
 }
 
 impl Config {
@@ -122,6 +126,8 @@ impl Config {
 
             oauth_state_secret,
             token_encryption_key,
+
+            otel_collector_endpoint: env::var("OTEL_COLLECTOR_ENDPOINT").ok(),
         }
     }
 

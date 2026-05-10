@@ -8,6 +8,11 @@ RUN npm install -g pnpm@10
 
 WORKDIR /app
 
+ARG VITE_FARO_URL
+ARG VITE_OTEL_COLLECTOR_ENDPOINT
+ENV VITE_FARO_URL=$VITE_FARO_URL
+ENV VITE_OTEL_COLLECTOR_ENDPOINT=$VITE_OTEL_COLLECTOR_ENDPOINT
+
 # Restore dependencies in a separate layer so they are cached unless
 # package.json / lockfile change.
 COPY frontend/package.json frontend/pnpm-lock.yaml ./frontend/
@@ -91,6 +96,7 @@ RUN apt-get update && apt-get install -y \
     tini \
     # TLS certificates (freshclam contacts the update mirrors over HTTPS)
     ca-certificates \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── ClamAV configuration ──────────────────────────────────────────────────────

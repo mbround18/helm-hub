@@ -5,7 +5,9 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::{
     AppState,
@@ -46,21 +48,25 @@ pub async fn create_token(
         )));
     }
 
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
     let raw_token = generate_api_token();
     let token_hash = hash_api_token(&raw_token);
-    let expires_at = (Utc::now() + Duration::days(req.ttl_days)).to_rfc3339();
+    let expires_at = Utc::now() + Duration::days(req.ttl_days);
 
     let record = NewApiToken::new(
-        claims.sub.clone(),
+        user_id,
         req.description.trim().to_string(),
         token_hash,
-        expires_at.clone(),
+        expires_at,
     );
 
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     diesel::insert_into(api_tokens::table)
         .values(&record)
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     tracing::info!(token_id = %record.id, ttl_days = req.ttl_days, "API token created");
 
@@ -86,12 +92,16 @@ pub async fn list_tokens(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<Vec<ApiToken>>, AppError> {
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let tokens = api_tokens::table
-        .filter(api_tokens::user_id.eq(&claims.sub))
+        .filter(api_tokens::user_id.eq(&user_id))
         .select(ApiToken::as_select())
         .order(api_tokens::created_at.desc())
-        .load(&mut conn)?;
+        .load(&mut conn)
+        .await?;
     Ok(Json(tokens))
 }
 
@@ -104,15 +114,19 @@ pub async fn list_tokens(
 pub async fn delete_token(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let n = diesel::delete(
         api_tokens::table
             .filter(api_tokens::id.eq(&id))
-            .filter(api_tokens::user_id.eq(&claims.sub)),
+            .filter(api_tokens::user_id.eq(&user_id)),
     )
-    .execute(&mut conn)?;
+    .execute(&mut conn)
+    .await?;
 
     if n == 0 {
         return Err(AppError::NotFound("Token not found".into()));

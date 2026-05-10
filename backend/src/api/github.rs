@@ -24,8 +24,10 @@ use axum::{
 };
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     AppState,
@@ -40,14 +42,14 @@ use crate::{
 
 #[derive(Serialize, Deserialize)]
 struct OAuthState {
-    user_id: String,
+    user_id: Uuid,
     return_to: String,
     exp: i64,
 }
 
-fn encode_oauth_state(user_id: &str, return_to: &str, secret: &str) -> Result<String, AppError> {
+fn encode_oauth_state(user_id: Uuid, return_to: &str, secret: &str) -> Result<String, AppError> {
     let claims = OAuthState {
-        user_id: user_id.to_string(),
+        user_id,
         return_to: return_to.to_string(),
         exp: Utc::now().timestamp() + 600,
     };
@@ -181,10 +183,13 @@ pub async fn oauth_url(
     let client_id = state.config.github_client_id.as_deref().unwrap();
     let redirect_uri = state.config.github_redirect_uri.as_deref().unwrap();
 
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
     // Validate return_to before embedding in the signed state.
     let return_to = safe_return_to(q.return_to.as_deref());
 
-    let oauth_state = encode_oauth_state(&claims.sub, return_to, &state.config.oauth_state_secret)?;
+    let oauth_state = encode_oauth_state(user_id, return_to, &state.config.oauth_state_secret)?;
 
     // Scope: `read:user` (profile) + `public_repo` (read public releases).
     // We deliberately do NOT request the `repo` scope (full private repo access).
@@ -275,7 +280,7 @@ pub async fn oauth_callback(
             }
         };
 
-    let mut conn = match state.db.get() {
+    let mut conn = match state.db.get().await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!(error = %e, "DB connection error during OAuth callback");
@@ -284,13 +289,14 @@ pub async fn oauth_callback(
     };
 
     let github_id = gh_user.id.to_string();
-    let now = Utc::now().to_rfc3339();
+    let now = Utc::now();
 
     let existing = github_connections::table
         .filter(github_connections::user_id.eq(&oauth_state.user_id))
         .filter(github_connections::github_id.eq(&github_id))
         .select(GithubConnection::as_select())
         .first(&mut conn)
+        .await
         .optional();
 
     match existing {
@@ -307,6 +313,7 @@ pub async fn oauth_callback(
                 github_connections::updated_at.eq(&now),
             ))
             .execute(&mut conn)
+            .await
             {
                 tracing::error!(error = %e, "DB update error during OAuth callback");
                 return redirect_err(return_to);
@@ -314,7 +321,7 @@ pub async fn oauth_callback(
         }
         Ok(None) => {
             let new_conn = NewGithubConnection::new(
-                oauth_state.user_id.clone(),
+                oauth_state.user_id,
                 github_id,
                 gh_user.login,
                 encrypted_token,
@@ -323,6 +330,7 @@ pub async fn oauth_callback(
             if let Err(e) = diesel::insert_into(github_connections::table)
                 .values(&new_conn)
                 .execute(&mut conn)
+                .await
             {
                 tracing::error!(error = %e, "DB insert error during OAuth callback");
                 return redirect_err(return_to);
@@ -343,11 +351,15 @@ pub async fn get_connection(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let connection = github_connections::table
-        .filter(github_connections::user_id.eq(&claims.sub))
+        .filter(github_connections::user_id.eq(&user_id))
         .select(GithubConnection::as_select())
         .first(&mut conn)
+        .await
         .optional()?;
 
     Ok(Json(serde_json::json!({ "connection": connection })))
@@ -359,9 +371,13 @@ pub async fn delete_connection(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get()?;
-    diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&claims.sub)))
-        .execute(&mut conn)?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&user_id)))
+        .execute(&mut conn)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -371,12 +387,16 @@ pub async fn list_repos(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<Vec<GithubRepo>>, AppError> {
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let repos = github_repos::table
-        .filter(github_repos::user_id.eq(&claims.sub))
+        .filter(github_repos::user_id.eq(&user_id))
         .select(GithubRepo::as_select())
         .order(github_repos::created_at.asc())
-        .load(&mut conn)?;
+        .load(&mut conn)
+        .await?;
     Ok(Json(repos))
 }
 
@@ -400,19 +420,23 @@ pub async fn add_repo(
     }
     let (repo_owner, repo_name) = (parts[0], parts[1]);
 
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     let gh_conn = github_connections::table
-        .filter(github_connections::user_id.eq(&claims.sub))
+        .filter(github_connections::user_id.eq(&user_id))
         .select(GithubConnection::as_select())
         .first(&mut conn)
+        .await
         .optional()?
         .ok_or_else(|| {
             AppError::BadRequest("Link your GitHub account before adding repositories.".into())
         })?;
 
     let new_repo = NewGithubRepo::new(
-        claims.sub.clone(),
+        user_id,
         gh_conn.id,
         repo_owner.to_string(),
         repo_name.to_string(),
@@ -420,12 +444,14 @@ pub async fn add_repo(
 
     diesel::insert_into(github_repos::table)
         .values(&new_repo)
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     let inserted = github_repos::table
         .find(&new_repo.id)
         .select(GithubRepo::as_select())
-        .first(&mut conn)?;
+        .first(&mut conn)
+        .await?;
 
     Ok((StatusCode::CREATED, Json(inserted)))
 }
@@ -435,15 +461,19 @@ pub async fn add_repo(
 pub async fn remove_repo(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let deleted = diesel::delete(
         github_repos::table
             .filter(github_repos::id.eq(&id))
-            .filter(github_repos::user_id.eq(&claims.sub)),
+            .filter(github_repos::user_id.eq(&user_id)),
     )
-    .execute(&mut conn)?;
+    .execute(&mut conn)
+    .await?;
 
     if deleted == 0 {
         return Err(AppError::NotFound("Repository not found".into()));
@@ -456,27 +486,33 @@ pub async fn remove_repo(
 pub async fn sync_repo(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<github_sync::SyncReport>, AppError> {
-    let mut conn = state.db.get()?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     let repo = github_repos::table
         .filter(github_repos::id.eq(&id))
-        .filter(github_repos::user_id.eq(&claims.sub))
+        .filter(github_repos::user_id.eq(&user_id))
         .select(GithubRepo::as_select())
         .first(&mut conn)
+        .await
         .optional()?
         .ok_or_else(|| AppError::NotFound("Repository not found".into()))?;
 
     let gh_conn = github_connections::table
         .find(&repo.github_connection_id)
         .select(GithubConnection::as_select())
-        .first(&mut conn)?;
+        .first(&mut conn)
+        .await?;
 
     let user = users::table
-        .find(&claims.sub)
+        .find(&user_id)
         .select(User::as_select())
-        .first(&mut conn)?;
+        .first(&mut conn)
+        .await?;
 
     // Decrypt the stored access token before use.
     let access_token = token_crypto::decrypt_token(

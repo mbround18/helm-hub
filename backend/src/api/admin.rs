@@ -1,6 +1,6 @@
 //! Admin-only endpoints — all require the `require_auth` + `require_admin` middleware chain.
 //!
-//! Every state-changing action writes a row to `admin_audit_log` so there is
+//! Every state-changing action writes a row to `audit_logs` so there is
 //! an immutable, timestamped record of who did what.
 
 use axum::{
@@ -9,33 +9,36 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::models::{AdminUpdateUser, NewAdminAuditLog, User},
+    db::models::{AdminUpdateUser, NewAuditLog, User, Artifact, ArtifactVersion},
     error::AppError,
-    schema::{admin_audit_log, chart_versions, charts, users},
+    schema::{audit_logs, artifact_versions, artifacts, users},
     services::settings,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn audit(
+async fn audit(
     conn: &mut crate::db::DbConn,
-    admin_id: &str,
+    admin_id: Option<Uuid>,
     action: &str,
     target_type: &str,
-    target_id: &str,
+    target_id: Option<Uuid>,
     meta: Option<serde_json::Value>,
 ) -> Result<(), AppError> {
-    let log = NewAdminAuditLog::new(admin_id, action, target_type, target_id, meta);
-    diesel::insert_into(admin_audit_log::table)
+    let log = NewAuditLog::new(admin_id, action, target_type, target_id, meta.unwrap_or(serde_json::json!({})));
+    diesel::insert_into(audit_logs::table)
         .values(&log)
-        .execute(conn)?;
+        .execute(conn)
+        .await?;
     Ok(())
 }
 
@@ -43,14 +46,14 @@ fn audit(
 
 #[derive(Serialize)]
 pub struct UserSummary {
-    pub id: String,
+    pub id: Uuid,
     pub username: String,
     pub email: String,
-    pub is_admin: i32,
-    pub banned_at: Option<String>,
+    pub is_admin: bool,
+    pub banned_at: Option<DateTime<Utc>>,
     pub storage_usage_bytes: i64,
     pub storage_quota_bytes: Option<i64>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 impl From<User> for UserSummary {
@@ -72,11 +75,12 @@ pub async fn list_users(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
 ) -> Result<Json<Vec<UserSummary>>, AppError> {
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let all: Vec<User> = users::table
         .select(User::as_select())
         .order(users::created_at.asc())
-        .load(&mut conn)?;
+        .load(&mut conn)
+        .await?;
     Ok(Json(all.into_iter().map(UserSummary::from).collect()))
 }
 
@@ -85,24 +89,26 @@ pub async fn list_users(
 pub async fn promote_user(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     let updated = diesel::update(users::table.filter(users::id.eq(&id)))
         .set(AdminUpdateUser {
-            is_admin: Some(1),
+            is_admin: Some(true),
             banned_at: None,
             storage_quota_bytes: None,
-            updated_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now(),
         })
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     if updated == 0 {
         return Err(AppError::NotFound("User not found".into()));
     }
 
-    audit(&mut conn, &claims.sub, "promote", "user", &id, None)?;
+    audit(&mut conn, admin_id, "promote", "user", Some(id), None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -111,29 +117,31 @@ pub async fn promote_user(
 pub async fn ban_user(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    if id == claims.sub {
+    let admin_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
+    if id == admin_id {
         return Err(AppError::BadRequest("Cannot ban yourself".into()));
     }
 
-    let mut conn = state.db.get()?;
-    let now = Utc::now().to_rfc3339();
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let now = Utc::now();
 
     let updated = diesel::update(users::table.filter(users::id.eq(&id)))
         .set(AdminUpdateUser {
             is_admin: None,
-            banned_at: Some(Some(now.clone())),
+            banned_at: Some(Some(now)),
             storage_quota_bytes: None,
             updated_at: now,
         })
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     if updated == 0 {
         return Err(AppError::NotFound("User not found".into()));
     }
 
-    audit(&mut conn, &claims.sub, "ban", "user", &id, None)?;
+    audit(&mut conn, Some(admin_id), "ban", "user", Some(id), None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -142,94 +150,92 @@ pub async fn ban_user(
 pub async fn purge_user(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    if id == claims.sub {
+    let admin_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
+    if id == admin_id {
         return Err(AppError::BadRequest("Cannot purge yourself".into()));
     }
 
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     let user: User = users::table
         .filter(users::id.eq(&id))
         .select(User::as_select())
         .first(&mut conn)
+        .await
         .map_err(|_| AppError::NotFound("User not found".into()))?;
 
-    // Delete chart files from disk first (best-effort).
+    // Delete artifact files from disk first (best-effort).
     let storage_root = std::path::Path::new(&state.config.charts_storage_path).join(&user.username);
     if storage_root.exists() {
         let _ = tokio::fs::remove_dir_all(&storage_root).await;
     }
 
-    // Cascade: chart_versions, charts, api_tokens, github_* are all FK'd to user.
-    // SQLite cascades work only when foreign_keys=ON — enforce with explicit deletes.
-    diesel::delete(
-        chart_versions::table.filter(
-            chart_versions::chart_id.eq_any(
-                charts::table
-                    .filter(charts::owner_id.eq(&id))
-                    .select(charts::id),
-            ),
-        ),
-    )
-    .execute(&mut conn)?;
-
-    diesel::delete(charts::table.filter(charts::owner_id.eq(&id))).execute(&mut conn)?;
-    diesel::delete(users::table.filter(users::id.eq(&id))).execute(&mut conn)?;
+    // Cascade: artifact_versions, artifacts, api_tokens, github_* are all FK'd to user.
+    // PostgreSQL handles cascade if configured, but we can also do it explicitly if needed.
+    // Assuming migrations set up ON DELETE CASCADE.
+    
+    diesel::delete(users::table.filter(users::id.eq(&id)))
+        .execute(&mut conn)
+        .await?;
 
     audit(
         &mut conn,
-        &claims.sub,
+        Some(admin_id),
         "purge",
         "user",
-        &id,
+        Some(id),
         Some(serde_json::json!({ "username": user.username })),
-    )?;
+    ).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ── DELETE /api/admin/charts/:owner/:chart_name ───────────────────────────────
+// ── DELETE /api/admin/artifacts/:owner/:chart_name ───────────────────────────────
 
-pub async fn delete_any_chart(
+pub async fn delete_any_artifact(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path((owner, chart_name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     // Resolve owner username → user_id.
-    let owner_id: String = users::table
+    let owner_id: Uuid = users::table
         .filter(users::username.eq(&owner))
         .select(users::id)
         .first(&mut conn)
+        .await
         .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
 
-    let chart: crate::db::models::Chart = charts::table
-        .filter(charts::owner_id.eq(&owner_id))
-        .filter(charts::name.eq(&chart_name))
-        .select(crate::db::models::Chart::as_select())
+    let artifact: Artifact = artifacts::table
+        .filter(artifacts::owner_id.eq(&owner_id))
+        .filter(artifacts::name.eq(&chart_name))
+        .select(Artifact::as_select())
         .first(&mut conn)
-        .map_err(|_| AppError::NotFound(format!("Chart '{chart_name}' not found")))?;
+        .await
+        .map_err(|_| AppError::NotFound(format!("Artifact '{chart_name}' not found")))?;
 
     // Collect storage paths before deleting DB rows.
-    let versions: Vec<crate::db::models::ChartVersion> = chart_versions::table
-        .filter(chart_versions::chart_id.eq(&chart.id))
-        .select(crate::db::models::ChartVersion::as_select())
-        .load(&mut conn)?;
+    let versions: Vec<ArtifactVersion> = artifact_versions::table
+        .filter(artifact_versions::artifact_id.eq(&artifact.id))
+        .select(ArtifactVersion::as_select())
+        .load(&mut conn)
+        .await?;
 
-    let total_bytes: i64 = versions
-        .iter()
-        .map(|v| {
-            let p = std::path::Path::new(&state.config.charts_storage_path).join(&v.storage_path);
-            std::fs::metadata(&p).map(|m| m.len() as i64).unwrap_or(0)
-        })
-        .sum();
+    let mut total_bytes: i64 = 0;
+    for v in &versions {
+        let p = std::path::Path::new(&state.config.charts_storage_path).join(&v.storage_path);
+        if let Ok(m) = tokio::fs::metadata(&p).await {
+            total_bytes += m.len() as i64;
+        }
+    }
 
-    diesel::delete(chart_versions::table.filter(chart_versions::chart_id.eq(&chart.id)))
-        .execute(&mut conn)?;
-    diesel::delete(charts::table.filter(charts::id.eq(&chart.id))).execute(&mut conn)?;
+    diesel::delete(artifacts::table.filter(artifacts::id.eq(&artifact.id)))
+        .execute(&mut conn)
+        .await?;
 
     // Delete files from disk (best-effort).
     for v in &versions {
@@ -239,17 +245,17 @@ pub async fn delete_any_chart(
 
     // Release storage quota for owner.
     if total_bytes > 0 {
-        crate::services::quota::release_quota(&state, &owner_id, total_bytes);
+        crate::services::quota::release_quota(&state, owner_id, total_bytes).await;
     }
 
     audit(
         &mut conn,
-        &claims.sub,
-        "delete_chart",
-        "chart",
-        &chart.id,
-        Some(serde_json::json!({ "owner": owner, "chart": chart_name })),
-    )?;
+        admin_id,
+        "delete_artifact",
+        "artifact",
+        Some(artifact.id),
+        Some(serde_json::json!({ "owner": owner, "artifact": chart_name })),
+    ).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -265,19 +271,21 @@ pub struct SetQuotaBody {
 pub async fn set_user_quota(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Json(body): Json<SetQuotaBody>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     let updated = diesel::update(users::table.filter(users::id.eq(&id)))
         .set(AdminUpdateUser {
             is_admin: None,
             banned_at: None,
             storage_quota_bytes: Some(body.quota_bytes),
-            updated_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now(),
         })
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     if updated == 0 {
         return Err(AppError::NotFound("User not found".into()));
@@ -285,12 +293,12 @@ pub async fn set_user_quota(
 
     audit(
         &mut conn,
-        &claims.sub,
+        admin_id,
         "set_quota",
         "user",
-        &id,
+        Some(id),
         Some(serde_json::json!({ "quota_bytes": body.quota_bytes })),
-    )?;
+    ).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -309,7 +317,8 @@ pub async fn update_settings(
     Extension(claims): Extension<Claims>,
     Json(body): Json<UpdateSettingsBody>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     if let Some(ref name) = body.app_name {
         let trimmed = name.trim();
@@ -318,7 +327,7 @@ pub async fn update_settings(
                 "app_name must be 1–64 characters".into(),
             ));
         }
-        settings::set(&mut conn, "app_name", trimmed)?;
+        settings::set(&mut conn, "app_name", trimmed).await?;
     }
 
     if let Some(ref url) = body.logo_url {
@@ -331,7 +340,7 @@ pub async fn update_settings(
                 "logo_url must be an http/https URL or empty".into(),
             ));
         }
-        settings::set(&mut conn, "logo_url", trimmed)?;
+        settings::set(&mut conn, "logo_url", trimmed).await?;
     }
 
     if let Some(enabled) = body.signup_enabled {
@@ -339,7 +348,7 @@ pub async fn update_settings(
             &mut conn,
             "signup_enabled",
             if enabled { "true" } else { "false" },
-        )?;
+        ).await?;
     }
 
     let meta = serde_json::json!({
@@ -349,12 +358,12 @@ pub async fn update_settings(
     });
     audit(
         &mut conn,
-        &claims.sub,
+        admin_id,
         "update_settings",
         "settings",
-        "global",
+        None,
         Some(meta),
-    )?;
+    ).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
