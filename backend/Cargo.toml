@@ -23,7 +23,7 @@ tokio = { version = "1.52.2", features = ["full"] }
 # Database
 diesel = { version = "2.2.7", features = ["postgres", "chrono", "uuid", "serde_json"] }
 diesel_migrations = { version = "2.2.0", features = ["postgres"] }
-diesel-async = { version = "0.5.0", features = ["postgres", "deadpool"] }
+diesel-async = { version = "0.9.0", features = ["postgres", "deadpool"] }
 deadpool = "0.10.0"
 
 # Auth
