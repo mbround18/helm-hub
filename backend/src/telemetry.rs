@@ -1,51 +1,50 @@
-/// Conditional OpenTelemetry initialisation.
-///
-/// When `OTEL_EXPORTER_OTLP_ENDPOINT` is present the function installs global
-/// OTel tracer and meter providers that export over OTLP/gRPC, and bridges the
-/// `tracing` ecosystem into them via `tracing-opentelemetry`.
-/// Without that variable only the standard `fmt` subscriber is installed.
-///
-/// The returned `TelemetryGuard` must stay alive for the whole process.
-/// Dropping it flushes pending spans/metrics and shuts both providers down.
+use opentelemetry::{KeyValue, global};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::{
+    Resource,
+    metrics::{PeriodicReader, SdkMeterProvider},
+    trace::SdkTracerProvider,
+};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use metrics_exporter_prometheus::{PrometheusHandle, PrometheusBuilder};
 
 pub struct TelemetryGuard {
-    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
-    meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
+    tracer_provider: Option<SdkTracerProvider>,
+    meter_provider: Option<SdkMeterProvider>,
 }
 
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
-        if let Some(tp) = self.tracer_provider.take() {
-            if let Err(e) = tp.shutdown() {
-                eprintln!("OTel tracer provider shutdown error: {e:?}");
-            }
+        if let Some(tp) = self.tracer_provider.take()
+            && let Err(e) = tp.shutdown() {
+            eprintln!("OTel tracer provider shutdown error: {e:?}");
         }
-        if let Some(mp) = self.meter_provider.take() {
-            if let Err(e) = mp.shutdown() {
-                eprintln!("OTel meter provider shutdown error: {e:?}");
-            }
+        if let Some(mp) = self.meter_provider.take()
+            && let Err(e) = mp.shutdown() {
+            eprintln!("OTel meter provider shutdown error: {e:?}");
         }
     }
 }
 
-/// Initialise the global tracing subscriber.  Call once before any `tracing`
-/// macros are used.  Keep the returned guard alive until the process exits.
-pub fn init(service_name: &'static str) -> TelemetryGuard {
-    let filter =
-        EnvFilter::from_default_env().add_directive("helm_hub_backend=debug".parse().unwrap());
+pub fn init(service_name: &'static str) -> (TelemetryGuard, PrometheusHandle) {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("helm_hub_backend=info,tower_http=info"));
 
-    match std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+    match std::env::var("OTEL_COLLECTOR_ENDPOINT") {
         Ok(endpoint) => init_with_otel(service_name, endpoint, filter),
         Err(_) => {
+            let builder = PrometheusBuilder::new();
+            let handle = builder.install_recorder().expect("Failed to install Prometheus recorder");
+
             tracing_subscriber::registry()
                 .with(filter)
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            TelemetryGuard {
+            
+            (TelemetryGuard {
                 tracer_provider: None,
                 meter_provider: None,
-            }
+            }, handle)
         }
     }
 }
@@ -54,52 +53,77 @@ fn init_with_otel(
     service_name: &'static str,
     endpoint: String,
     filter: EnvFilter,
-) -> TelemetryGuard {
-    use opentelemetry::KeyValue;
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
-    use opentelemetry_sdk::{
-        Resource,
-        metrics::{PeriodicReader, SdkMeterProvider},
-        trace::SdkTracerProvider,
-    };
-
+) -> (TelemetryGuard, PrometheusHandle) {
     let resource = Resource::builder()
         .with_service_name(service_name)
         .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
         .build();
 
-    // ── Tracer provider (batched OTLP/gRPC export) ────────────────────────────
-    let span_exporter = SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(&endpoint)
-        .build()
-        .expect("Failed to build OTLP span exporter");
+    let is_http = endpoint.starts_with("http://") || endpoint.starts_with("https://");
 
-    let tracer_provider = SdkTracerProvider::builder()
-        .with_resource(resource.clone())
-        .with_batch_exporter(span_exporter)
-        .build();
+    // ── Tracer Provider ───────────────────────────────────────────────────────
+    let tracer_provider = if is_http {
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_endpoint(&endpoint)
+            .build()
+            .expect("Failed to build OTLP HTTP span exporter");
+        
+        SdkTracerProvider::builder()
+            .with_resource(resource.clone())
+            .with_batch_exporter(exporter)
+            .build()
+    } else {
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(&endpoint)
+            .build()
+            .expect("Failed to build OTLP gRPC span exporter");
+            
+        SdkTracerProvider::builder()
+            .with_resource(resource.clone())
+            .with_batch_exporter(exporter)
+            .build()
+    };
 
-    // ── Meter provider (periodic OTLP/gRPC export) ───────────────────────────
-    let metric_exporter = MetricExporter::builder()
-        .with_tonic()
-        .with_endpoint(&endpoint)
-        .build()
-        .expect("Failed to build OTLP metric exporter");
+    global::set_tracer_provider(tracer_provider.clone());
 
-    let meter_provider = SdkMeterProvider::builder()
-        .with_resource(resource)
-        .with_reader(PeriodicReader::builder(metric_exporter).build())
-        .build();
+    // ── Meter Provider ────────────────────────────────────────────────────────
+    let meter_provider = if is_http {
+        let exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .with_endpoint(&endpoint)
+            .build()
+            .expect("Failed to build OTLP HTTP metric exporter");
+            
+        SdkMeterProvider::builder()
+            .with_resource(resource.clone())
+            .with_reader(PeriodicReader::builder(exporter).build())
+            .build()
+    } else {
+        let exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_tonic()
+            .with_endpoint(&endpoint)
+            .build()
+            .expect("Failed to build OTLP gRPC metric exporter");
+            
+        SdkMeterProvider::builder()
+            .with_resource(resource.clone())
+            .with_reader(PeriodicReader::builder(exporter).build())
+            .build()
+    };
 
-    // Register as globals so library crates can resolve them.
-    opentelemetry::global::set_tracer_provider(tracer_provider.clone());
-    opentelemetry::global::set_meter_provider(meter_provider.clone());
+    global::set_meter_provider(meter_provider.clone());
 
-    // Bridge tracing spans → OTel spans.
-    let otel_layer =
-        tracing_opentelemetry::OpenTelemetryLayer::new(tracer_provider.tracer(service_name));
+    // ── Metrics setup (Prometheus for scraping) ────────────────────────────────
+    let prom_handle = PrometheusBuilder::new()
+        .install_recorder()
+        .expect("Failed to install Prometheus recorder");
+
+    // ── Tracing Subscriber ────────────────────────────────────────────────────
+    let otel_layer = tracing_opentelemetry::OpenTelemetryLayer::new(
+        opentelemetry::trace::TracerProvider::tracer(&tracer_provider, service_name)
+    );
 
     tracing_subscriber::registry()
         .with(filter)
@@ -109,8 +133,8 @@ fn init_with_otel(
 
     tracing::info!(%endpoint, "OpenTelemetry OTLP export active");
 
-    TelemetryGuard {
+    (TelemetryGuard {
         tracer_provider: Some(tracer_provider),
         meter_provider: Some(meter_provider),
-    }
+    }, prom_handle)
 }

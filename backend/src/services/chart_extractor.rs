@@ -6,7 +6,7 @@ use std::{
 };
 use tar::Archive;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExtractedChart {
     pub chart_yaml: String,
     pub values_yaml: Option<String>,

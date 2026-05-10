@@ -1,37 +1,37 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::schema::users;
 
-#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Identifiable)]
 #[diesel(table_name = users)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct User {
-    pub id: String,
+    pub id: Uuid,
     pub username: String,
     pub email: String,
     #[serde(skip_serializing)]
     pub password_hash: String,
     #[serde(skip_serializing)]
     pub totp_secret: Option<String>,
-    pub totp_enabled: i32,
-    pub is_admin: i32,
-    pub banned_at: Option<String>,
+    pub totp_enabled: bool,
+    pub is_admin: bool,
+    pub banned_at: Option<DateTime<Utc>>,
     pub storage_usage_bytes: i64,
     pub storage_quota_bytes: Option<i64>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl User {
     pub fn is_totp_enabled(&self) -> bool {
-        self.totp_enabled != 0
+        self.totp_enabled
     }
 
     pub fn is_admin(&self) -> bool {
-        self.is_admin != 0
+        self.is_admin
     }
 
     pub fn is_banned(&self) -> bool {
@@ -42,35 +42,35 @@ impl User {
 #[derive(Debug, Insertable, Deserialize)]
 #[diesel(table_name = users)]
 pub struct NewUser {
-    pub id: String,
+    pub id: Uuid,
     pub username: String,
     pub email: String,
     pub password_hash: String,
     pub totp_secret: Option<String>,
-    pub totp_enabled: i32,
-    pub is_admin: i32,
-    pub banned_at: Option<String>,
+    pub totp_enabled: bool,
+    pub is_admin: bool,
+    pub banned_at: Option<DateTime<Utc>>,
     pub storage_usage_bytes: i64,
     pub storage_quota_bytes: Option<i64>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl NewUser {
     pub fn new(username: String, email: String, password_hash: String) -> Self {
-        let now = Utc::now().to_rfc3339();
+        let now = Utc::now();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             username,
             email,
             password_hash,
             totp_secret: None,
-            totp_enabled: 0,
-            is_admin: 0,
+            totp_enabled: false,
+            is_admin: false,
             banned_at: None,
             storage_usage_bytes: 0,
             storage_quota_bytes: None,
-            created_at: now.clone(),
+            created_at: now,
             updated_at: now,
         }
     }
@@ -82,8 +82,8 @@ pub struct UpdateUser {
     pub email: Option<String>,
     pub password_hash: Option<String>,
     pub totp_secret: Option<Option<String>>,
-    pub totp_enabled: Option<i32>,
-    pub updated_at: String,
+    pub totp_enabled: Option<bool>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl Default for UpdateUser {
@@ -93,7 +93,7 @@ impl Default for UpdateUser {
             password_hash: None,
             totp_secret: None,
             totp_enabled: None,
-            updated_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now(),
         }
     }
 }
@@ -102,8 +102,8 @@ impl Default for UpdateUser {
 #[derive(Debug, AsChangeset)]
 #[diesel(table_name = users)]
 pub struct AdminUpdateUser {
-    pub is_admin: Option<i32>,
-    pub banned_at: Option<Option<String>>,
+    pub is_admin: Option<bool>,
+    pub banned_at: Option<Option<DateTime<Utc>>>,
     pub storage_quota_bytes: Option<Option<i64>>,
-    pub updated_at: String,
+    pub updated_at: DateTime<Utc>,
 }

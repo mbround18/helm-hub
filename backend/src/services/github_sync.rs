@@ -9,25 +9,24 @@
 //! through the standard scan-and-persist pipeline.  Versions that already
 //! exist in the database are silently skipped.
 
-use axum::body::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
     AppState,
-    api::charts::scan_and_persist,
+    api::artifacts::scan_and_persist,
     db::models::{GithubRepo, User},
     error::AppError,
-    schema::{chart_versions, charts, github_repos},
+    schema::{artifact_versions, artifacts, github_repos},
 };
 
 // ── GitHub API response types ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct GithubRelease {
-    tag_name: String,
     assets: Vec<GithubAsset>,
 }
 
@@ -53,7 +52,7 @@ pub struct ChartSyncEntry {
 pub struct SyncReport {
     pub repo: String,
     pub entries: Vec<ChartSyncEntry>,
-    pub synced_at: String,
+    pub synced_at: DateTime<Utc>,
 }
 
 // ── Core sync logic ───────────────────────────────────────────────────────────
@@ -97,7 +96,7 @@ pub async fn sync_repo(
             };
 
             // Skip if this version is already stored.
-            if version_exists(state, &user.id, &chart_name, &version) {
+            if version_exists(state, user.id, &chart_name, &version).await {
                 entries.push(ChartSyncEntry {
                     chart: chart_name,
                     version,
@@ -123,15 +122,17 @@ pub async fn sync_repo(
     }
 
     // Update last_synced_at
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let now = Utc::now();
     diesel::update(github_repos::table.find(&repo.id))
-        .set(github_repos::last_synced_at.eq(Utc::now().to_rfc3339()))
-        .execute(&mut conn)?;
+        .set(github_repos::last_synced_at.eq(Some(now)))
+        .execute(&mut conn)
+        .await?;
 
     Ok(SyncReport {
         repo: format!("{}/{}", repo.repo_owner, repo.repo_name),
         entries,
-        synced_at: Utc::now().to_rfc3339(),
+        synced_at: now,
     })
 }
 
@@ -148,7 +149,7 @@ pub fn parse_asset_name(filename: &str) -> Option<(String, String)> {
 
     let split_at = (0..bytes.len())
         .rev()
-        .find(|&i| bytes[i] == b'-' && bytes.get(i + 1).map_or(false, |b| b.is_ascii_digit()))?;
+        .find(|&i| bytes[i] == b'-' && bytes.get(i + 1).is_some_and(|b| b.is_ascii_digit()))?;
 
     let name = &stem[..split_at];
     let ver = &stem[split_at + 1..];
@@ -159,18 +160,19 @@ pub fn parse_asset_name(filename: &str) -> Option<(String, String)> {
     Some((name.to_string(), ver.to_string()))
 }
 
-fn version_exists(state: &AppState, user_id: &str, chart_name: &str, version: &str) -> bool {
-    let Ok(mut conn) = state.db.get() else {
+async fn version_exists(state: &AppState, user_id: Uuid, chart_name: &str, version: &str) -> bool {
+    let Ok(mut conn) = state.db.get().await else {
         return false;
     };
 
-    let count: i64 = charts::table
-        .inner_join(chart_versions::table.on(chart_versions::chart_id.eq(charts::id)))
-        .filter(charts::owner_id.eq(user_id))
-        .filter(charts::name.eq(chart_name))
-        .filter(chart_versions::version.eq(version))
+    let count: i64 = artifacts::table
+        .inner_join(artifact_versions::table.on(artifact_versions::artifact_id.eq(artifacts::id)))
+        .filter(artifacts::owner_id.eq(user_id))
+        .filter(artifacts::name.eq(chart_name))
+        .filter(artifact_versions::version.eq(version))
         .count()
         .get_result(&mut conn)
+        .await
         .unwrap_or(0);
 
     count > 0
@@ -239,7 +241,7 @@ async fn download_and_import(
         Ok(b) => b,
         Err(e) => return make_failed(format!("Failed to read download body: {e}")),
     };
-    let bytes = Bytes::from(bytes_vec);
+    let bytes = bytes_vec;
 
     // Write to a temp file (required by scan_and_persist for ClamAV).
     let temp_path = std::path::Path::new(&state.config.temp_upload_dir).join(format!(
@@ -252,7 +254,7 @@ async fn download_and_import(
         return make_failed(format!("Failed to write temp file: {e}"));
     }
 
-    let result = scan_and_persist(state, &user.id, &user.username, &bytes, &temp_path).await;
+    let result = scan_and_persist(state, &user.id.to_string(), &user.username, &bytes, &temp_path).await;
 
     if let Err(e) = tokio::fs::remove_file(&temp_path).await {
         tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove sync temp file");
@@ -260,7 +262,7 @@ async fn download_and_import(
 
     match result {
         Ok(uploaded) => ChartSyncEntry {
-            chart: uploaded.chart,
+            chart: uploaded.artifact,
             version: uploaded.version,
             status: "imported",
             message: None,

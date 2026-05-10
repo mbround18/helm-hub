@@ -54,21 +54,12 @@ pub struct AppState {
 async fn main() {
     dotenvy::dotenv().ok();
 
-    let _telemetry = telemetry::init("helm-hub");
-
-    let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .install_recorder()
-        .expect("Failed to install Prometheus recorder");
+    let (_telemetry, prometheus_handle) = telemetry::init("helm-hub");
 
     let config = Config::from_env();
     let pool = init_pool(&config.database_url);
 
-    {
-        let mut conn = pool
-            .get()
-            .expect("Failed to get DB connection for migrations");
-        run_migrations(&mut conn);
-    }
+    run_migrations(&config.database_url);
 
     std::fs::create_dir_all(&config.charts_storage_path)
         .expect("Failed to create chart storage directory");
@@ -84,6 +75,9 @@ async fn main() {
         metrics: prometheus_handle,
         http_client,
     };
+
+    // ── Background Metrics ────────────────────────────────────────────────────
+    tokio::spawn(services::metrics::start_background_metrics(state.clone()));
 
     // ── CORS ──────────────────────────────────────────────────────────────────
     // Restrict to the configured frontend origin — not a wildcard.
@@ -118,25 +112,26 @@ async fn main() {
     // ── Public routes — rate limited, no auth required ────────────────────────
     let public_routes = Router::new()
         .route("/api/settings", get(api::settings::get_settings))
+        .route("/api/telemetry/faro", post(api::telemetry::faro_proxy))
         .route("/api/auth/register", post(api::auth::register))
         .route("/api/auth/login", post(api::auth::login))
         .route(
             "/api/auth/github/callback",
             get(api::github::oauth_callback),
         )
-        .route("/api/charts", get(api::charts::list_charts))
-        .route("/api/charts/{owner}", get(api::charts::list_user_charts))
+        .route("/api/artifacts", get(api::artifacts::list_artifacts))
+        .route("/api/artifacts/{owner}", get(api::artifacts::list_user_artifacts))
         .route(
-            "/api/charts/{owner}/index.yaml",
-            get(api::charts::chart_repo_index),
+            "/api/artifacts/{owner}/index.yaml",
+            get(api::artifacts::artifact_repo_index),
         )
         .route(
-            "/api/charts/{owner}/{chart_name}",
-            get(api::charts::list_chart_versions),
+            "/api/artifacts/{owner}/{chart_name}",
+            get(api::artifacts::list_artifact_versions),
         )
         .route(
-            "/api/charts/{owner}/{chart_name}/{version}/download",
-            get(api::charts::download_chart),
+            "/api/artifacts/{owner}/{chart_name}/{version}/download",
+            get(api::artifacts::download_artifact),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -157,8 +152,8 @@ async fn main() {
             axum::routing::put(api::admin::set_user_quota),
         )
         .route(
-            "/api/admin/charts/{owner}/{chart_name}",
-            delete(api::admin::delete_any_chart),
+            "/api/admin/artifacts/{owner}/{chart_name}",
+            delete(api::admin::delete_any_artifact),
         )
         .route(
             "/api/admin/settings",
@@ -181,14 +176,14 @@ async fn main() {
     let authed_routes = Router::new()
         .route("/api/auth/totp/setup", post(api::auth::totp_setup))
         .route("/api/auth/totp/enable", post(api::auth::totp_enable))
-        .route("/api/charts/{owner}", post(api::charts::upload_chart))
+        .route("/api/artifacts/{owner}", post(api::artifacts::upload_artifact))
         .route(
-            "/api/charts/{owner}/{chart_name}",
-            delete(api::charts::purge_chart),
+            "/api/artifacts/{owner}/{chart_name}",
+            delete(api::artifacts::purge_artifact),
         )
         .route(
-            "/api/charts/{owner}/{chart_name}/{version}",
-            delete(api::charts::delete_chart_version),
+            "/api/artifacts/{owner}/{chart_name}/{version}",
+            delete(api::artifacts::delete_artifact_version),
         )
         .route(
             "/api/tokens",
