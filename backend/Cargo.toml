@@ -60,7 +60,7 @@ sha2 = "0.11.0"
 tempfile = "3.27.0"
 
 # HTTP client — GitHub API calls
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
   "json",
   "rustls-tls",
 ] }
