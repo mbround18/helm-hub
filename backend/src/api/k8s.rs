@@ -39,10 +39,10 @@ pub async fn healthz() -> StatusCode {
 pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
     let mut failures: Vec<&'static str> = Vec::new();
 
-    // ── SQLite pool ───────────────────────────────────────────────────────────
-    if state.db.get().is_err() {
-        tracing::warn!("readyz: SQLite pool exhausted or unavailable");
-        failures.push("sqlite_pool_unavailable");
+    // ── PostgreSQL pool ───────────────────────────────────────────────────────
+    if state.db.get().await.is_err() {
+        tracing::warn!("readyz: PostgreSQL pool exhausted or unavailable");
+        failures.push("postgres_pool_unavailable");
     }
 
     // ── ClamAV daemon socket ──────────────────────────────────────────────────

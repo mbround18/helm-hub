@@ -21,10 +21,10 @@ tower-http = { version = "0.6.10", features = [
 tokio = { version = "1.52.2", features = ["full"] }
 
 # Database
-diesel = { version = "2.3.9", features = ["sqlite", "r2d2", "chrono", "uuid"] }
-diesel_migrations = { version = "2.3.2", features = ["sqlite"] }
-libsqlite3-sys = { version = "0.37.0", features = ["bundled"] }
-r2d2 = "0.8.10"
+diesel = { version = "2.2.7", features = ["postgres", "chrono", "uuid", "serde_json"] }
+diesel_migrations = { version = "2.2.0", features = ["postgres"] }
+diesel-async = { version = "0.5.0", features = ["postgres", "deadpool"] }
+deadpool = "0.10.0"
 
 # Auth
 argon2 = "0.5.3"
@@ -90,10 +90,15 @@ opentelemetry_sdk = { version = "0.31.0", features = [
 ] }
 opentelemetry-otlp = { version = "0.31.1", features = [
   "grpc-tonic",
+  "http-proto",
   "trace",
   "metrics",
 ] }
 tracing-opentelemetry = "0.32.1"
+opentelemetry-semantic-conventions = "0.31.0"
+crc32fast = "1.5.0"
+futures-util = "0.3.32"
+metrics-util = "0.20.3"
 
 [dev-dependencies]
 axum-test = "20.0.0"

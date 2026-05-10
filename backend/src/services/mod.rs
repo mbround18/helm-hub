@@ -1,6 +1,7 @@
 pub mod chart_extractor;
 pub mod clamav;
 pub mod github_sync;
+pub mod metrics;
 pub mod quota;
 pub mod rate_limiter;
 pub mod settings;

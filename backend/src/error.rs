@@ -39,8 +39,8 @@ pub enum AppError {
     #[error(transparent)]
     Diesel(#[from] diesel::result::Error),
 
-    #[error(transparent)]
-    R2d2(#[from] r2d2::Error),
+    #[error("Database pool error: {0}")]
+    Pool(String),
 
     #[error(transparent)]
     Io(#[from] std::io::Error),

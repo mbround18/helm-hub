@@ -1,14 +1,35 @@
 services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: helmhub
+      POSTGRES_USER: helmhub
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-helmhub}
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helmhub -d helmhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_FARO_URL: ${VITE_FARO_URL:-}
+        VITE_OTEL_COLLECTOR_ENDPOINT: ${OTEL_COLLECTOR_ENDPOINT:-}
     ports:
       - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
     env_file:
       - .env
     environment:
-      DATABASE_URL: /data/helm-hub.db
+      DATABASE_URL: postgres://helmhub:${DB_PASSWORD:-helmhub}@db:5432/helmhub
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or environment}
       CHARTS_STORAGE_PATH: /data/charts
       TEMP_UPLOAD_DIR: /tmp/helm-uploads
@@ -17,10 +38,13 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       RUST_LOG: helm_hub_backend=info,tower_http=info
+      OTEL_COLLECTOR_ENDPOINT: ${OTEL_COLLECTOR_ENDPOINT:-}
+      VITE_FARO_URL: ${VITE_FARO_URL:-}
+      VITE_OTEL_COLLECTOR_ENDPOINT: ${OTEL_COLLECTOR_ENDPOINT:-}
     volumes:
       - helm_data:/data
     healthcheck:
-      test: [ "CMD-SHELL", "curl -sf http://localhost:3000/api/charts || exit 1" ]
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/charts || exit 1"]
       interval: 15s
       timeout: 5s
       start_period: 90s # allow time for freshclam + clamd startup
@@ -29,3 +53,4 @@ services:
 
 volumes:
   helm_data:
+  postgres_data:

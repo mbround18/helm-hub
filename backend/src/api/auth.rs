@@ -1,8 +1,11 @@
 use axum::{Json, extract::State};
-use chrono::{Timelike, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use diesel::prelude::*;
+use diesel_async::{AsyncConnection, RunQueryDsl};
+use diesel_async::scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use crate::{
     AppState,
@@ -54,11 +57,16 @@ fn validate_email(email: &str) -> Result<(), AppError> {
 // ── Brute-force protection ────────────────────────────────────────────────────
 
 /// 15-minute window key for failed login tracking.
-fn login_window() -> String {
+fn login_window() -> DateTime<Utc> {
     let now = Utc::now();
     // Rounded down to the nearest 15-minute boundary.
     let quarter = now.minute() / 15;
-    format!("{}-q{quarter}", now.format("%Y-%m-%dT%H"))
+    now.with_minute(quarter * 15)
+        .unwrap()
+        .with_second(0)
+        .unwrap()
+        .with_nanosecond(0)
+        .unwrap()
 }
 
 /// Returns the rate-limit key for failed login attempts for a given username.
@@ -82,24 +90,25 @@ const MAX_FAILED_LOGINS: i32 = 10;
 /// limit.  Does NOT increment the counter — call `record_failed_login` on
 /// failure.  Fails **open** on DB errors so a storage hiccup never locks
 /// everyone out.
-fn check_failed_logins(state: &AppState, username: &str) -> Result<(), AppError> {
+async fn check_failed_logins(state: &AppState, username: &str) -> Result<(), AppError> {
     let key = login_attempt_key(username);
     let window = login_window();
 
-    let mut conn = match state.db.get() {
+    let mut conn = match state.db.get().await {
         Ok(c) => c,
         Err(_) => return Ok(()), // fail open
     };
 
-    let existing: Option<(i32, String)> = rate_limit_windows::table
+    let existing: Option<(i32, DateTime<Utc>)> = rate_limit_windows::table
         .find(&key)
         .select((rate_limit_windows::count, rate_limit_windows::window_start))
         .first(&mut conn)
+        .await
         .optional()
         .unwrap_or(None);
 
     match existing {
-        Some((count, ref ws)) if *ws == window && count >= MAX_FAILED_LOGINS => {
+        Some((count, ws)) if ws == window && count >= MAX_FAILED_LOGINS => {
             Err(AppError::TooManyRequests(
                 "Too many failed login attempts. Please wait 15 minutes.".into(),
             ))
@@ -110,42 +119,48 @@ fn check_failed_logins(state: &AppState, username: &str) -> Result<(), AppError>
 
 /// Increments the failed-login counter for `username`.  Fails silently on DB
 /// errors so a storage issue never surfaces as a confusing error to the user.
-fn record_failed_login(state: &AppState, username: &str) {
+async fn record_failed_login(state: &AppState, username: &str) {
     let key = login_attempt_key(username);
     let window = login_window();
 
-    let Ok(mut conn) = state.db.get() else { return };
+    let Ok(mut conn) = state.db.get().await else { return };
 
-    let _ = conn.transaction::<(), diesel::result::Error, _>(|conn| {
-        use rate_limit_windows::dsl::{
-            count, key as key_col, rate_limit_windows as table, window_start,
-        };
+    let _ = conn.transaction::<(), AppError, _>(|conn| {
+        async move {
+            use rate_limit_windows::dsl::{
+                count, key as key_col, rate_limit_windows as table, window_start,
+            };
 
-        let existing = table
-            .find(&key)
-            .select((count, window_start))
-            .first::<(i32, String)>(conn)
-            .optional()?;
+            let existing = table
+                .find(&key)
+                .select((count, window_start))
+                .first::<(i32, DateTime<Utc>)>(conn)
+                .await
+                .optional()?;
 
-        match existing {
-            None => {
-                diesel::insert_into(table)
-                    .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
-                    .execute(conn)?;
+            match existing {
+                None => {
+                    diesel::insert_into(table)
+                        .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
+                        .execute(conn)
+                        .await?;
+                }
+                Some((_, ws)) if ws < window => {
+                    diesel::update(table.find(&key))
+                        .set((count.eq(1), window_start.eq(&window)))
+                        .execute(conn)
+                        .await?;
+                }
+                Some((c, _)) => {
+                    diesel::update(table.find(&key))
+                        .set(count.eq(c + 1))
+                        .execute(conn)
+                        .await?;
+                }
             }
-            Some((_, ref ws)) if *ws < window => {
-                diesel::update(table.find(&key))
-                    .set((count.eq(1), window_start.eq(&window)))
-                    .execute(conn)?;
-            }
-            Some((c, _)) => {
-                diesel::update(table.find(&key))
-                    .set(count.eq(c + 1))
-                    .execute(conn)?;
-            }
-        }
-        Ok(())
-    });
+            Ok(())
+        }.scope_boxed()
+    }).await;
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────
@@ -167,8 +182,8 @@ pub async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, AppError> {
     {
-        let mut conn = state.db.get()?;
-        if !settings::signup_enabled(&mut conn) {
+        let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+        if !settings::signup_enabled(&mut conn).await {
             return Err(AppError::Forbidden(
                 "Registration is currently disabled".into(),
             ));
@@ -190,15 +205,17 @@ pub async fn register(
     let hash = hash_password(&req.password)?;
     let new_user = NewUser::new(req.username, req.email, hash);
 
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     diesel::insert_into(users::table)
         .values(&new_user)
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     let user: User = users::table
         .filter(users::id.eq(&new_user.id))
         .select(User::as_select())
-        .first(&mut conn)?;
+        .first(&mut conn)
+        .await?;
 
     Ok(Json(RegisterResponse { user }))
 }
@@ -223,9 +240,9 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AppError> {
     // Check failed-login counter before touching the DB for the user record.
-    check_failed_logins(&state, &req.username)?;
+    check_failed_logins(&state, &req.username).await?;
 
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     // Use a constant-time-friendly error: same message for "no such user" and
     // "wrong password" to prevent username enumeration.
@@ -233,13 +250,18 @@ pub async fn login(
         .filter(users::username.eq(&req.username))
         .select(User::as_select())
         .first(&mut conn)
+        .await
         .map_err(|_| {
-            record_failed_login(&state, &req.username);
+            let state_clone = state.clone();
+            let username_clone = req.username.clone();
+            tokio::spawn(async move {
+                record_failed_login(&state_clone, &username_clone).await;
+            });
             AppError::Unauthorized("Invalid credentials".into())
         })?;
 
     if !verify_password(&req.password, &user.password_hash)? {
-        record_failed_login(&state, &req.username);
+        record_failed_login(&state, &req.username).await;
         return Err(AppError::Unauthorized("Invalid credentials".into()));
     }
 
@@ -249,17 +271,18 @@ pub async fn login(
 
     // Auto-promote the bootstrap admin on their first login so the DB stays
     // consistent and the returned user object / JWT both carry is_admin=true.
-    if !user.is_admin() && state.config.admin_username.as_deref() == Some(user.username.as_str()) {
+    if !user.is_admin && state.config.admin_username.as_deref() == Some(user.username.as_str()) {
         let _ = diesel::update(users::table.filter(users::id.eq(&user.id)))
             .set((
-                crate::schema::users::is_admin.eq(1),
-                crate::schema::users::updated_at.eq(chrono::Utc::now().to_rfc3339()),
+                crate::schema::users::is_admin.eq(true),
+                crate::schema::users::updated_at.eq(chrono::Utc::now()),
             ))
-            .execute(&mut conn);
-        user.is_admin = 1;
+            .execute(&mut conn)
+            .await;
+        user.is_admin = true;
     }
 
-    if user.is_totp_enabled() {
+    if user.totp_enabled {
         let code = req
             .totp_code
             .as_deref()
@@ -271,15 +294,15 @@ pub async fn login(
             .ok_or_else(|| AppError::Internal("TOTP enabled but secret missing".into()))?;
 
         if !verify_code(secret, code, &user.username, "HelmHub")? {
-            record_failed_login(&state, &req.username);
+            record_failed_login(&state, &req.username).await;
             return Err(AppError::Unauthorized("Invalid TOTP code".into()));
         }
     }
 
     let claims = Claims::new(
-        &user.id,
+        &user.id.to_string(),
         &user.username,
-        user.is_admin(),
+        user.is_admin,
         state.config.jwt_expiry_hours,
     );
     let token = encode_jwt(&claims, &state.config.jwt_secret)?;
@@ -302,13 +325,15 @@ pub async fn totp_setup(
     let secret = generate_secret();
     let uri = provisioning_uri(&claims.username, &secret, "HelmHub")?;
 
-    let mut conn = state.db.get()?;
-    diesel::update(users::table.filter(users::id.eq(&claims.sub)))
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let user_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
+    diesel::update(users::table.filter(users::id.eq(&user_id)))
         .set(&UpdateUser {
             totp_secret: Some(Some(secret.clone())),
             ..Default::default()
         })
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     Ok(Json(TotpSetupResponse {
         secret,
@@ -326,12 +351,14 @@ pub async fn totp_enable(
     claims: axum::extract::Extension<Claims>,
     Json(req): Json<TotpVerifyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut conn = state.db.get()?;
+    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let user_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
 
     let user: User = users::table
-        .filter(users::id.eq(&claims.sub))
+        .filter(users::id.eq(&user_id))
         .select(User::as_select())
-        .first(&mut conn)?;
+        .first(&mut conn)
+        .await?;
 
     let secret = user
         .totp_secret
@@ -342,12 +369,13 @@ pub async fn totp_enable(
         return Err(AppError::BadRequest("Invalid TOTP code".into()));
     }
 
-    diesel::update(users::table.filter(users::id.eq(&claims.sub)))
+    diesel::update(users::table.filter(users::id.eq(&user_id)))
         .set(&UpdateUser {
-            totp_enabled: Some(1),
+            totp_enabled: Some(true),
             ..Default::default()
         })
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+        .await?;
 
     Ok(Json(
         serde_json::json!({ "message": "TOTP enabled successfully" }),
