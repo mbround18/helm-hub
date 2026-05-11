@@ -12,8 +12,9 @@ on:
 # example change to trigger ci 3
 
 permissions:
-  contents: read
   packages: write
+  contents: write
+  pull-requests: write
 
 jobs:
   docker_release:
