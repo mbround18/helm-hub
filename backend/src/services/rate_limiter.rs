@@ -8,7 +8,6 @@ use axum::{
 use chrono::{Timelike, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, RunQueryDsl};
-use diesel_async::scoped_futures::ScopedFutureExt;
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
@@ -91,47 +90,44 @@ async fn check_and_increment(state: &AppState, key: &str, limit: i32) -> bool {
     let now = Utc::now();
     let window = now.date_naive().and_hms_opt(now.hour(), 0, 0).unwrap().and_utc();
 
-    let result = conn.transaction::<bool, diesel::result::Error, _>(|conn| {
-        let key = key.to_string();
-        async move {
-            use rate_limit_windows::dsl::{
-                count, key as key_col, rate_limit_windows as table, window_start,
-            };
+    let result = conn.transaction::<bool, diesel::result::Error, _>(async |conn| {
+        use rate_limit_windows::dsl::{
+            count, key as key_col, rate_limit_windows as table, window_start,
+        };
 
-            let existing = table
-                .find(&key)
-                .select((count, window_start))
-                .first::<(i32, chrono::DateTime<Utc>)>(conn)
-                .await
-                .optional()?;
+        let existing = table
+            .find(key)
+            .select((count, window_start))
+            .first::<(i32, chrono::DateTime<Utc>)>(conn)
+            .await
+            .optional()?;
 
-            let new_count: i32 = match existing {
-                None => {
-                    diesel::insert_into(table)
-                        .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
-                        .execute(conn)
-                        .await?;
-                    1
-                }
-                Some((_, ref ws)) if *ws < window => {
-                    diesel::update(table.find(&key))
-                        .set((count.eq(1), window_start.eq(&window)))
-                        .execute(conn)
-                        .await?;
-                    1
-                }
-                Some((c, _)) => {
-                    let next = c + 1;
-                    diesel::update(table.find(&key))
-                        .set(count.eq(next))
-                        .execute(conn)
-                        .await?;
-                    next
-                }
-            };
+        let new_count: i32 = match existing {
+            None => {
+                diesel::insert_into(table)
+                    .values((key_col.eq(key), count.eq(1), window_start.eq(&window)))
+                    .execute(conn)
+                    .await?;
+                1
+            }
+            Some((_, ref ws)) if *ws < window => {
+                diesel::update(table.find(key))
+                    .set((count.eq(1), window_start.eq(&window)))
+                    .execute(conn)
+                    .await?;
+                1
+            }
+            Some((c, _)) => {
+                let next = c + 1;
+                diesel::update(table.find(key))
+                    .set(count.eq(next))
+                    .execute(conn)
+                    .await?;
+                next
+            }
+        };
 
-            Ok(new_count <= limit)
-        }.scope_boxed()
+        Ok(new_count <= limit)
     }).await;
 
     match result {
