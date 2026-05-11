@@ -9,7 +9,7 @@ on:
       - main
   workflow_dispatch:
 
-# example change to trigger ci 6
+# example change to trigger ci 7
 
 permissions:
   packages: write
