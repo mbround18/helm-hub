@@ -31,14 +31,18 @@ pub fn decrypt_token(stored: &str, key: &[u8; 32]) -> Result<String, AppError> {
 
     let nonce_bytes =
         hex::decode(nonce_hex).map_err(|_| AppError::Internal("Invalid token nonce".into()))?;
-    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+    if nonce_bytes.len() != 12 {
+        return Err(AppError::Internal("Invalid token nonce length".into()));
+    }
+    let mut nonce = aes_gcm::Nonce::default();
+    nonce.copy_from_slice(&nonce_bytes);
 
     let ct =
         hex::decode(ct_hex).map_err(|_| AppError::Internal("Invalid token ciphertext".into()))?;
 
     let cipher = Aes256Gcm::new(key.into());
     let plain = cipher
-        .decrypt(nonce, ct.as_ref())
+        .decrypt(&nonce, ct.as_ref())
         .map_err(|_| AppError::Internal("Token decryption failed".into()))?;
 
     String::from_utf8(plain).map_err(|_| AppError::Internal("Token UTF-8 error".into()))

@@ -2,7 +2,6 @@ use axum::{Json, extract::State};
 use chrono::{DateTime, Timelike, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, RunQueryDsl};
-use diesel_async::scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -125,41 +124,39 @@ async fn record_failed_login(state: &AppState, username: &str) {
 
     let Ok(mut conn) = state.db.get().await else { return };
 
-    let _ = conn.transaction::<(), AppError, _>(|conn| {
-        async move {
-            use rate_limit_windows::dsl::{
-                count, key as key_col, rate_limit_windows as table, window_start,
-            };
+    let _ = conn.transaction::<(), AppError, _>(async |conn| {
+        use rate_limit_windows::dsl::{
+            count, key as key_col, rate_limit_windows as table, window_start,
+        };
 
-            let existing = table
-                .find(&key)
-                .select((count, window_start))
-                .first::<(i32, DateTime<Utc>)>(conn)
-                .await
-                .optional()?;
+        let existing = table
+            .find(&key)
+            .select((count, window_start))
+            .first::<(i32, DateTime<Utc>)>(conn)
+            .await
+            .optional()?;
 
-            match existing {
-                None => {
-                    diesel::insert_into(table)
-                        .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
-                        .execute(conn)
-                        .await?;
-                }
-                Some((_, ws)) if ws < window => {
-                    diesel::update(table.find(&key))
-                        .set((count.eq(1), window_start.eq(&window)))
-                        .execute(conn)
-                        .await?;
-                }
-                Some((c, _)) => {
-                    diesel::update(table.find(&key))
-                        .set(count.eq(c + 1))
-                        .execute(conn)
-                        .await?;
-                }
+        match existing {
+            None => {
+                diesel::insert_into(table)
+                    .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
+                    .execute(conn)
+                    .await?;
             }
-            Ok(())
-        }.scope_boxed()
+            Some((_, ws)) if ws < window => {
+                diesel::update(table.find(&key))
+                    .set((count.eq(1), window_start.eq(&window)))
+                    .execute(conn)
+                    .await?;
+            }
+            Some((c, _)) => {
+                diesel::update(table.find(&key))
+                    .set(count.eq(c + 1))
+                    .execute(conn)
+                    .await?;
+            }
+        }
+        Ok(())
     }).await;
 }
 

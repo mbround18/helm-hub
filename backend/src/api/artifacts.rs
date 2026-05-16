@@ -8,7 +8,6 @@ use axum::{
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, RunQueryDsl};
-use diesel_async::scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path as FsPath;
@@ -252,102 +251,93 @@ pub(crate) async fn scan_and_persist(
     let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     // ── Transactional DB update with Advisory Lock ────────────────────────────
-    let result = conn.transaction::<UploadedArtifact, AppError, _>(|conn| {
-        let artifact_name = artifact_name.clone();
-        let version = version.clone();
-        let description = description.clone();
-        let app_version = app_version.clone();
-        let extracted = extracted.clone();
-        let storage_path = storage_path.clone();
-
-        async move {
-            let artifact: Artifact = match artifacts::table
-                .filter(artifacts::owner_id.eq(user_id))
-                .filter(artifacts::name.eq(&artifact_name))
-                .select(Artifact::as_select())
-                .first(conn)
-                .await
-                .optional()?
-            {
-                Some(a) => a,
-                None => {
-                    let new_artifact =
-                        NewArtifact::new(user_id, artifact_name.clone(), "helm".to_string(), description.clone());
-                    diesel::insert_into(artifacts::table)
-                        .values(&new_artifact)
-                        .execute(conn)
-                        .await?;
-                    artifacts::table
-                        .filter(artifacts::id.eq(&new_artifact.id))
-                        .select(Artifact::as_select())
-                        .first(conn)
-                        .await?
-                }
-            };
-
-            // ── Advisory Lock ─────────────────────────────────────────────────────
-            // Prevent concurrent uploads of the same version for the same artifact.
-            let lock_key = format!("{}-{}", artifact.id, version);
-            let lock_id = crc32fast::hash(lock_key.as_bytes()) as i64;
-            diesel::sql_query("SELECT pg_advisory_xact_lock($1)")
-                .bind::<diesel::sql_types::BigInt, _>(lock_id)
-                .execute(conn)
-                .await?;
-
-            let exists = artifact_versions::table
-                .filter(artifact_versions::artifact_id.eq(&artifact.id))
-                .filter(artifact_versions::version.eq(&version))
-                .count()
-                .get_result::<i64>(conn)
-                .await?
-                > 0;
-
-            if exists {
-                return Err(AppError::Conflict(format!(
-                    "Version {version} of artifact {artifact_name} already exists"
-                )));
+    let result = conn.transaction::<UploadedArtifact, AppError, _>(async |conn| {
+        let artifact: Artifact = match artifacts::table
+            .filter(artifacts::owner_id.eq(user_id))
+            .filter(artifacts::name.eq(&artifact_name))
+            .select(Artifact::as_select())
+            .first(conn)
+            .await
+            .optional()?
+        {
+            Some(a) => a,
+            None => {
+                let new_artifact =
+                    NewArtifact::new(user_id, artifact_name.clone(), "helm".to_string(), description.clone());
+                diesel::insert_into(artifacts::table)
+                    .values(&new_artifact)
+                    .execute(conn)
+                    .await?;
+                artifacts::table
+                    .filter(artifacts::id.eq(&new_artifact.id))
+                    .select(Artifact::as_select())
+                    .first(conn)
+                    .await?
             }
+        };
 
-            // ── Index in database ─────────────────────────────────────────────────────
-            let mut metadata = serde_json::json!({
-                "app_version": app_version,
-                "description": description,
-            });
-            if let Ok(chart_yaml) = serde_json::from_str::<serde_json::Value>(&extracted.chart_yaml) {
-                metadata["chart_yaml"] = chart_yaml;
-            }
-            if let Some(v) = extracted.values_yaml.as_deref()
-                && let Ok(values_yaml) = serde_json::from_str::<serde_json::Value>(v) {
-                metadata["values_yaml"] = values_yaml;
-            }
-            if let Some(s) = extracted.schema_json.as_deref()
-                && let Ok(schema_json) = serde_json::from_str::<serde_json::Value>(s) {
-                metadata["schema_json"] = schema_json;
-            }
+        // ── Advisory Lock ─────────────────────────────────────────────────────
+        // Prevent concurrent uploads of the same version for the same artifact.
+        let lock_key = format!("{}-{}", artifact.id, version);
+        let lock_id = crc32fast::hash(lock_key.as_bytes()) as i64;
+        diesel::sql_query("SELECT pg_advisory_xact_lock($1)")
+            .bind::<diesel::sql_types::BigInt, _>(lock_id)
+            .execute(conn)
+            .await?;
 
-            let new_version = NewArtifactVersion {
-                id: Uuid::new_v4(),
-                artifact_id: artifact.id,
-                version: version.clone(),
-                digest: hex::decode(&extracted.digest).unwrap_or_default(),
-                size: artifact_bytes,
-                storage_path: storage_path.clone(),
-                metadata,
-                deprecated: false,
-                created_at: Utc::now(),
-            };
+        let exists = artifact_versions::table
+            .filter(artifact_versions::artifact_id.eq(&artifact.id))
+            .filter(artifact_versions::version.eq(&version))
+            .count()
+            .get_result::<i64>(conn)
+            .await?
+            > 0;
 
-            diesel::insert_into(artifact_versions::table)
-                .values(&new_version)
-                .execute(conn)
-                .await?;
+        if exists {
+            return Err(AppError::Conflict(format!(
+                "Version {version} of artifact {artifact_name} already exists"
+            )));
+        }
 
-            Ok(UploadedArtifact {
-                artifact: artifact_name,
-                version,
-                owner: owner.to_string(),
-            })
-        }.scope_boxed()
+        // ── Index in database ─────────────────────────────────────────────────────
+        let mut metadata = serde_json::json!({
+            "app_version": app_version,
+            "description": description,
+        });
+        if let Ok(chart_yaml) = serde_json::from_str::<serde_json::Value>(&extracted.chart_yaml) {
+            metadata["chart_yaml"] = chart_yaml;
+        }
+        if let Some(v) = extracted.values_yaml.as_deref()
+            && let Ok(values_yaml) = serde_json::from_str::<serde_json::Value>(v) {
+            metadata["values_yaml"] = values_yaml;
+        }
+        if let Some(s) = extracted.schema_json.as_deref()
+            && let Ok(schema_json) = serde_json::from_str::<serde_json::Value>(s) {
+            metadata["schema_json"] = schema_json;
+        }
+
+        let new_version = NewArtifactVersion {
+            id: Uuid::new_v4(),
+            artifact_id: artifact.id,
+            version: version.clone(),
+            digest: hex::decode(&extracted.digest).unwrap_or_default(),
+            size: artifact_bytes,
+            storage_path: storage_path.clone(),
+            metadata,
+            deprecated: false,
+            created_at: Utc::now(),
+        };
+
+        diesel::insert_into(artifact_versions::table)
+            .values(&new_version)
+            .execute(conn)
+            .await?;
+
+        Ok(UploadedArtifact {
+            artifact: artifact_name.clone(),
+            version: version.clone(),
+            owner: owner.to_string(),
+        })
     }).await;
 
     match result {
