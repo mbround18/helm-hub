@@ -54,7 +54,10 @@ struct FailedArtifact {
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::{RlsConn, models::{Artifact, ArtifactVersion, NewArtifact, NewArtifactVersion}},
+    db::{
+        RlsConn,
+        models::{Artifact, ArtifactVersion, NewArtifact, NewArtifactVersion},
+    },
     error::AppError,
     schema::{artifact_versions, artifacts, users},
     services::{
@@ -144,7 +147,8 @@ pub async fn upload_artifact(
 
         tokio::fs::write(&temp_path, &bytes).await?;
 
-        let outcome = scan_and_persist(&state, &mut conn, &claims.sub, &owner, &bytes, &temp_path).await;
+        let outcome =
+            scan_and_persist(&state, &mut conn, &claims.sub, &owner, &bytes, &temp_path).await;
 
         if let Err(e) = tokio::fs::remove_file(&temp_path).await {
             tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove temp upload file");
@@ -224,10 +228,10 @@ pub(crate) async fn scan_and_persist(
     let extracted = extract_chart_metadata(bytes)
         .map_err(|e| AppError::BadRequest(format!("Invalid Helm chart archive: {e}")))?;
 
-    let (artifact_name, version, app_version, description) = parse_chart_yaml(&extracted.chart_yaml)
-        .ok_or_else(|| {
-        AppError::BadRequest("Chart.yaml missing required fields (name, version)".into())
-    })?;
+    let (artifact_name, version, app_version, description) =
+        parse_chart_yaml(&extracted.chart_yaml).ok_or_else(|| {
+            AppError::BadRequest("Chart.yaml missing required fields (name, version)".into())
+        })?;
 
     // ── Quota check (atomic reserve before touching disk) ─────────────────────
     let artifact_bytes = bytes.len() as i64;
@@ -237,7 +241,8 @@ pub(crate) async fn scan_and_persist(
             user_id,
             artifact_bytes,
             state.config.default_storage_quota_bytes,
-        ).await?;
+        )
+        .await?;
     }
 
     // ── Persist to permanent storage ──────────────────────────────────────────
@@ -252,108 +257,117 @@ pub(crate) async fn scan_and_persist(
     };
 
     // ── Transactional DB update with Advisory Lock ────────────────────────────
-    let result = conn.transaction::<UploadedArtifact, AppError, _>(async |conn| {
-        let artifact: Artifact = match artifacts::table
-            .filter(artifacts::owner_id.eq(user_id))
-            .filter(artifacts::name.eq(&artifact_name))
-            .select(Artifact::as_select())
-            .first(conn)
-            .await
-            .optional()?
-        {
-            Some(a) => a,
-            None => {
-                let new_artifact =
-                    NewArtifact::new(user_id, artifact_name.clone(), "helm".to_string(), description.clone());
-                diesel::insert_into(artifacts::table)
-                    .values(&new_artifact)
-                    .execute(conn)
-                    .await?;
-                artifacts::table
-                    .filter(artifacts::id.eq(&new_artifact.id))
-                    .select(Artifact::as_select())
-                    .first(conn)
-                    .await?
+    let result = conn
+        .transaction::<UploadedArtifact, AppError, _>(async |conn| {
+            let artifact: Artifact = match artifacts::table
+                .filter(artifacts::owner_id.eq(user_id))
+                .filter(artifacts::name.eq(&artifact_name))
+                .select(Artifact::as_select())
+                .first(conn)
+                .await
+                .optional()?
+            {
+                Some(a) => a,
+                None => {
+                    let new_artifact = NewArtifact::new(
+                        user_id,
+                        artifact_name.clone(),
+                        "helm".to_string(),
+                        description.clone(),
+                    );
+                    diesel::insert_into(artifacts::table)
+                        .values(&new_artifact)
+                        .execute(conn)
+                        .await?;
+                    artifacts::table
+                        .filter(artifacts::id.eq(&new_artifact.id))
+                        .select(Artifact::as_select())
+                        .first(conn)
+                        .await?
+                }
+            };
+
+            // ── Advisory Lock ─────────────────────────────────────────────────────
+            // Prevent concurrent uploads of the same version for the same artifact.
+            let lock_key = format!("{}-{}", artifact.id, version);
+            let lock_id = crc32fast::hash(lock_key.as_bytes()) as i64;
+            diesel::sql_query("SELECT pg_advisory_xact_lock($1)")
+                .bind::<diesel::sql_types::BigInt, _>(lock_id)
+                .execute(conn)
+                .await?;
+
+            let exists = artifact_versions::table
+                .filter(artifact_versions::artifact_id.eq(&artifact.id))
+                .filter(artifact_versions::version.eq(&version))
+                .count()
+                .get_result::<i64>(conn)
+                .await?
+                > 0;
+
+            if exists {
+                return Err(AppError::Conflict(format!(
+                    "Version {version} of artifact {artifact_name} already exists"
+                )));
             }
-        };
 
-        // ── Advisory Lock ─────────────────────────────────────────────────────
-        // Prevent concurrent uploads of the same version for the same artifact.
-        let lock_key = format!("{}-{}", artifact.id, version);
-        let lock_id = crc32fast::hash(lock_key.as_bytes()) as i64;
-        diesel::sql_query("SELECT pg_advisory_xact_lock($1)")
-            .bind::<diesel::sql_types::BigInt, _>(lock_id)
-            .execute(conn)
-            .await?;
-
-        let exists = artifact_versions::table
-            .filter(artifact_versions::artifact_id.eq(&artifact.id))
-            .filter(artifact_versions::version.eq(&version))
-            .count()
-            .get_result::<i64>(conn)
-            .await?
-            > 0;
-
-        if exists {
-            return Err(AppError::Conflict(format!(
-                "Version {version} of artifact {artifact_name} already exists"
-            )));
-        }
-
-        // ── Index in database ─────────────────────────────────────────────────────
-        let mut metadata = serde_json::json!({
-            "app_version": app_version,
-            "description": description,
-        });
-        if let Ok(chart_yaml) = serde_json::from_str::<serde_json::Value>(&extracted.chart_yaml) {
-            metadata["chart_yaml"] = chart_yaml;
-        }
-        if let Some(v) = extracted.values_yaml.as_deref()
-            && let Ok(values_yaml) = serde_json::from_str::<serde_json::Value>(v) {
-            metadata["values_yaml"] = values_yaml;
-        }
-        if let Some(s) = extracted.schema_json.as_deref()
-            && let Ok(schema_json) = serde_json::from_str::<serde_json::Value>(s) {
-            metadata["schema_json"] = schema_json;
-        }
-
-        let new_version = NewArtifactVersion {
-            id: Uuid::new_v4(),
-            artifact_id: artifact.id,
-            version: version.clone(),
-            digest: hex::decode(&extracted.digest).unwrap_or_default(),
-            size: artifact_bytes,
-            storage_path: storage_path.clone(),
-            metadata,
-            deprecated: false,
-            created_at: Utc::now(),
-        };
-
-        diesel::insert_into(artifact_versions::table)
-            .values(&new_version)
-            .execute(conn)
-            .await?;
-
-        audit(
-            conn,
-            Some(user_id),
-            "upload",
-            "artifact_version",
-            Some(new_version.id),
-            Some(serde_json::json!({
-                "artifact": artifact_name,
-                "version": version,
+            // ── Index in database ─────────────────────────────────────────────────────
+            let mut metadata = serde_json::json!({
                 "app_version": app_version,
-            })),
-        )
-        .await?;
+                "description": description,
+            });
+            if let Ok(chart_yaml) = serde_json::from_str::<serde_json::Value>(&extracted.chart_yaml)
+            {
+                metadata["chart_yaml"] = chart_yaml;
+            }
+            if let Some(v) = extracted.values_yaml.as_deref()
+                && let Ok(values_yaml) = serde_json::from_str::<serde_json::Value>(v)
+            {
+                metadata["values_yaml"] = values_yaml;
+            }
+            if let Some(s) = extracted.schema_json.as_deref()
+                && let Ok(schema_json) = serde_json::from_str::<serde_json::Value>(s)
+            {
+                metadata["schema_json"] = schema_json;
+            }
 
-        Ok(UploadedArtifact {
-            artifact: artifact_name.clone(),
-            version: version.clone(),
-            owner: owner.to_string(),
+            let new_version = NewArtifactVersion {
+                id: Uuid::new_v4(),
+                artifact_id: artifact.id,
+                version: version.clone(),
+                digest: hex::decode(&extracted.digest).unwrap_or_default(),
+                size: artifact_bytes,
+                storage_path: storage_path.clone(),
+                metadata,
+                deprecated: false,
+                created_at: Utc::now(),
+            };
+
+            diesel::insert_into(artifact_versions::table)
+                .values(&new_version)
+                .execute(conn)
+                .await?;
+
+            audit(
+                conn,
+                Some(user_id),
+                "upload",
+                "artifact_version",
+                Some(new_version.id),
+                Some(serde_json::json!({
+                    "artifact": artifact_name,
+                    "version": version,
+                    "app_version": app_version,
+                })),
+            )
+            .await?;
+
+            Ok(UploadedArtifact {
+                artifact: artifact_name.clone(),
+                version: version.clone(),
+                owner: owner.to_string(),
+            })
         })
-    }).await;
+        .await;
 
     match result {
         Ok(ok) => {
@@ -413,14 +427,16 @@ pub async fn list_artifacts(
     let offset = (params.page.unwrap_or(1) - 1) * per_page;
 
     let results: Vec<PublicArtifact> = if let Some(q) = params.q.as_deref() {
-        diesel::sql_query("
+        diesel::sql_query(
+            "
             SELECT a.*, u.username
             FROM artifacts a
             JOIN users u ON a.owner_id = u.id
             WHERE a.is_private = false AND (a.name % $1 OR a.description % $1)
             ORDER BY similarity(a.name, $1) DESC
             LIMIT $2 OFFSET $3
-        ")
+        ",
+        )
         .bind::<diesel::sql_types::Text, _>(q)
         .bind::<diesel::sql_types::BigInt, _>(per_page)
         .bind::<diesel::sql_types::BigInt, _>(offset)
@@ -466,7 +482,6 @@ pub async fn list_user_artifacts(
         .first(&mut conn)
         .await
         .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
-
 
     let results = artifacts::table
         .filter(artifacts::owner_id.eq(user_id))
@@ -718,9 +733,11 @@ pub async fn purge_artifact(
         }
     }
 
-    diesel::delete(artifact_versions::table.filter(artifact_versions::artifact_id.eq(&artifact.id)))
-        .execute(&mut conn)
-        .await?;
+    diesel::delete(
+        artifact_versions::table.filter(artifact_versions::artifact_id.eq(&artifact.id)),
+    )
+    .execute(&mut conn)
+    .await?;
 
     diesel::delete(artifacts::table.filter(artifacts::id.eq(&artifact.id)))
         .execute(&mut conn)
@@ -827,8 +844,16 @@ pub async fn artifact_repo_index(
                     api_version: "v2".to_string(),
                     name: artifact_name.clone(),
                     version: v.version,
-                    app_version: v.metadata.get("app_version").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    description: v.metadata.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    app_version: v
+                        .metadata
+                        .get("app_version")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    description: v
+                        .metadata
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     urls: vec![url],
                     created: v.created_at.to_rfc3339(),
                     digest: hex::encode(v.digest),

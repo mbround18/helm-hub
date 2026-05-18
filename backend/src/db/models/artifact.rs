@@ -36,7 +36,12 @@ pub struct NewArtifact {
 }
 
 impl NewArtifact {
-    pub fn new(owner_id: Uuid, name: String, artifact_type: String, description: Option<String>) -> Self {
+    pub fn new(
+        owner_id: Uuid,
+        name: String,
+        artifact_type: String,
+        description: Option<String>,
+    ) -> Self {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),

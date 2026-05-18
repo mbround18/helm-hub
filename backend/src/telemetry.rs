@@ -1,3 +1,4 @@
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
@@ -6,7 +7,6 @@ use opentelemetry_sdk::{
     trace::SdkTracerProvider,
 };
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use metrics_exporter_prometheus::{PrometheusHandle, PrometheusBuilder};
 
 pub struct TelemetryGuard {
     tracer_provider: Option<SdkTracerProvider>,
@@ -16,11 +16,13 @@ pub struct TelemetryGuard {
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
         if let Some(tp) = self.tracer_provider.take()
-            && let Err(e) = tp.shutdown() {
+            && let Err(e) = tp.shutdown()
+        {
             eprintln!("OTel tracer provider shutdown error: {e:?}");
         }
         if let Some(mp) = self.meter_provider.take()
-            && let Err(e) = mp.shutdown() {
+            && let Err(e) = mp.shutdown()
+        {
             eprintln!("OTel meter provider shutdown error: {e:?}");
         }
     }
@@ -34,20 +36,27 @@ pub fn init(service_name: &'static str, log_format: &str) -> (TelemetryGuard, Pr
         Ok(endpoint) => init_with_otel(service_name, endpoint, log_format, filter),
         Err(_) => {
             let builder = PrometheusBuilder::new();
-            let handle = builder.install_recorder().expect("Failed to install Prometheus recorder");
+            let handle = builder
+                .install_recorder()
+                .expect("Failed to install Prometheus recorder");
 
             let registry = tracing_subscriber::registry().with(filter);
 
             if log_format == "json" {
-                registry.with(tracing_subscriber::fmt::layer().json()).init();
+                registry
+                    .with(tracing_subscriber::fmt::layer().json())
+                    .init();
             } else {
                 registry.with(tracing_subscriber::fmt::layer()).init();
             }
-            
-            (TelemetryGuard {
-                tracer_provider: None,
-                meter_provider: None,
-            }, handle)
+
+            (
+                TelemetryGuard {
+                    tracer_provider: None,
+                    meter_provider: None,
+                },
+                handle,
+            )
         }
     }
 }
@@ -72,7 +81,7 @@ fn init_with_otel(
             .with_endpoint(&endpoint)
             .build()
             .expect("Failed to build OTLP HTTP span exporter");
-        
+
         SdkTracerProvider::builder()
             .with_resource(resource.clone())
             .with_batch_exporter(exporter)
@@ -83,7 +92,7 @@ fn init_with_otel(
             .with_endpoint(&endpoint)
             .build()
             .expect("Failed to build OTLP gRPC span exporter");
-            
+
         SdkTracerProvider::builder()
             .with_resource(resource.clone())
             .with_batch_exporter(exporter)
@@ -99,7 +108,7 @@ fn init_with_otel(
             .with_endpoint(&endpoint)
             .build()
             .expect("Failed to build OTLP HTTP metric exporter");
-            
+
         SdkMeterProvider::builder()
             .with_resource(resource.clone())
             .with_reader(PeriodicReader::builder(exporter).build())
@@ -110,7 +119,7 @@ fn init_with_otel(
             .with_endpoint(&endpoint)
             .build()
             .expect("Failed to build OTLP gRPC metric exporter");
-            
+
         SdkMeterProvider::builder()
             .with_resource(resource.clone())
             .with_reader(PeriodicReader::builder(exporter).build())
@@ -126,23 +135,26 @@ fn init_with_otel(
 
     // ── Tracing Subscriber ────────────────────────────────────────────────────
     let otel_layer = tracing_opentelemetry::OpenTelemetryLayer::new(
-        opentelemetry::trace::TracerProvider::tracer(&tracer_provider, service_name)
+        opentelemetry::trace::TracerProvider::tracer(&tracer_provider, service_name),
     );
 
-    let registry = tracing_subscriber::registry()
-        .with(filter)
-        .with(otel_layer);
+    let registry = tracing_subscriber::registry().with(filter).with(otel_layer);
 
     if log_format == "json" {
-        registry.with(tracing_subscriber::fmt::layer().json()).init();
+        registry
+            .with(tracing_subscriber::fmt::layer().json())
+            .init();
     } else {
         registry.with(tracing_subscriber::fmt::layer()).init();
     }
 
     tracing::info!(%endpoint, "OpenTelemetry OTLP export active");
 
-    (TelemetryGuard {
-        tracer_provider: Some(tracer_provider),
-        meter_provider: Some(meter_provider),
-    }, prom_handle)
+    (
+        TelemetryGuard {
+            tracer_provider: Some(tracer_provider),
+            meter_provider: Some(meter_provider),
+        },
+        prom_handle,
+    )
 }

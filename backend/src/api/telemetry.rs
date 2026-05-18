@@ -32,14 +32,17 @@ pub async fn faro_proxy(
     let collector_url = std::env::var("INTERNAL_FARO_URL")
         .ok()
         .or_else(|| state.config.otel_collector_endpoint.clone())
-        .ok_or_else(|| AppError::Internal("No internal collector configured for Faro proxy".into()))?;
+        .ok_or_else(|| {
+            AppError::Internal("No internal collector configured for Faro proxy".into())
+        })?;
 
     // 3. Forward the request
     let body = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024) // 10MB limit
         .await
         .map_err(|e| AppError::BadRequest(format!("Failed to read body: {e}")))?;
 
-    let mut forward_req = state.http_client
+    let mut forward_req = state
+        .http_client
         .request(Method::POST, &collector_url)
         .body(body);
 
@@ -53,5 +56,6 @@ pub async fn faro_proxy(
         AppError::Internal("Failed to forward telemetry".into())
     })?;
 
-    Ok(StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
+    Ok(StatusCode::from_u16(response.status().as_u16())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
 }

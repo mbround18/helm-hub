@@ -18,7 +18,10 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::{RlsConn, models::{AdminUpdateUser, User, Artifact, ArtifactVersion}},
+    db::{
+        RlsConn,
+        models::{AdminUpdateUser, Artifact, ArtifactVersion, User},
+    },
     error::AppError,
     schema::{artifact_versions, artifacts, users},
     services::{audit::audit, settings},
@@ -160,7 +163,7 @@ pub async fn purge_user(
     // Cascade: artifact_versions, artifacts, api_tokens, github_* are all FK'd to user.
     // PostgreSQL handles cascade if configured, but we can also do it explicitly if needed.
     // Assuming migrations set up ON DELETE CASCADE.
-    
+
     diesel::delete(users::table.filter(users::id.eq(&id)))
         .execute(&mut conn)
         .await?;
@@ -172,7 +175,8 @@ pub async fn purge_user(
         "user",
         Some(id),
         Some(serde_json::json!({ "username": user.username })),
-    ).await?;
+    )
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -241,7 +245,8 @@ pub async fn delete_any_artifact(
         "artifact",
         Some(artifact.id),
         Some(serde_json::json!({ "owner": owner, "artifact": chart_name })),
-    ).await?;
+    )
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -285,7 +290,8 @@ pub async fn set_user_quota(
         "user",
         Some(id),
         Some(serde_json::json!({ "quota_bytes": body.quota_bytes })),
-    ).await?;
+    )
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -336,7 +342,8 @@ pub async fn update_settings(
             &mut conn,
             "signup_enabled",
             if enabled { "true" } else { "false" },
-        ).await?;
+        )
+        .await?;
     }
 
     let meta = serde_json::json!({
@@ -351,7 +358,8 @@ pub async fn update_settings(
         "settings",
         None,
         Some(meta),
-    ).await?;
+    )
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

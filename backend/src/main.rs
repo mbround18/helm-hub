@@ -1,4 +1,8 @@
-use helm_hub_backend::{app, AppState, config::Config, db::{init_pool, run_migrations}};
+use helm_hub_backend::{
+    AppState, app,
+    config::Config,
+    db::{init_pool, run_migrations},
+};
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -6,7 +10,8 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let config = Config::from_env();
-    let (_telemetry, prometheus_handle) = helm_hub_backend::telemetry::init("helm-hub", &config.log_format);
+    let (_telemetry, prometheus_handle) =
+        helm_hub_backend::telemetry::init("helm-hub", &config.log_format);
 
     config.print_summary();
 

@@ -1,11 +1,7 @@
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::{
-    db::models::NewAuditLog,
-    error::AppError,
-    schema::audit_logs,
-};
+use crate::{db::models::NewAuditLog, error::AppError, schema::audit_logs};
 
 /// Records a state-changing action in the `audit_logs` table.
 ///

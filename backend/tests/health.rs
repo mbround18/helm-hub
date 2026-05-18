@@ -7,8 +7,8 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 async fn test_health_check() {
     dotenvy::dotenv().ok();
     let config = Config::from_env();
-    let pool = init_pool(&config.database_url);
-    
+    let pool = init_pool(&config.database_url, config.db_pool_size);
+
     let metrics = PrometheusBuilder::new()
         .install_recorder()
         .expect("Failed to install prometheus recorder");
@@ -23,6 +23,6 @@ async fn test_health_check() {
     let app = app(state);
     let server = TestServer::new(app);
 
-    let response = server.get("/k8s/healthz").await;
+    let response = server.get("/healthz").await;
     response.assert_status(StatusCode::OK);
 }

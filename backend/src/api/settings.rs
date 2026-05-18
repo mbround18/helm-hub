@@ -14,10 +14,17 @@ pub struct AppSettingsResponse {
 pub async fn get_settings(
     State(state): State<AppState>,
 ) -> Result<Json<AppSettingsResponse>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
-    let app_name =
-        crate::services::settings::get(&mut conn, "app_name").await.unwrap_or_else(|_| "Helm Hub".into());
-    let logo_url = crate::services::settings::get(&mut conn, "logo_url").await.unwrap_or_default();
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
+    let app_name = crate::services::settings::get(&mut conn, "app_name")
+        .await
+        .unwrap_or_else(|_| "Helm Hub".into());
+    let logo_url = crate::services::settings::get(&mut conn, "logo_url")
+        .await
+        .unwrap_or_default();
     let signup_enabled = crate::services::settings::signup_enabled(&mut conn).await;
     Ok(Json(AppSettingsResponse {
         app_name,

@@ -62,7 +62,9 @@ impl Config {
         let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
         if jwt_secret.len() < 32 {
-            tracing::warn!("JWT_SECRET is shorter than 32 characters. This is not recommended for production.");
+            tracing::warn!(
+                "JWT_SECRET is shorter than 32 characters. This is not recommended for production."
+            );
         }
 
         // Derive oauth_state_secret: domain-separated SHA-256 of jwt_secret.
@@ -164,22 +166,47 @@ impl Config {
         tracing::info!("── Configuration Summary ──────────────────────────────────");
         tracing::info!("Host: {}:{}", self.host, self.port);
         tracing::info!("Mgmt: {}:{}", self.host, self.mgmt_port);
-        tracing::info!("Database: {}", self.database_url.split('@').last().unwrap_or("unknown"));
+        tracing::info!(
+            "Database: {}",
+            self.database_url.split('@').last().unwrap_or("unknown")
+        );
         tracing::info!("Charts Storage: {}", self.charts_storage_path);
         tracing::info!("Static Assets: {}", self.static_assets_path);
         tracing::info!("Trust Proxy: {}", self.trust_proxy);
-        tracing::info!("ClamAV: {}", if self.clamav_enabled { format!("Enabled ({})", self.clamd_socket) } else { "Disabled".into() });
-        tracing::info!("GitHub Sync: {}", if self.github_enabled() { "Enabled" } else { "Disabled" });
-        tracing::info!("Admin User: {}", self.admin_username.as_deref().unwrap_or("None"));
+        tracing::info!(
+            "ClamAV: {}",
+            if self.clamav_enabled {
+                format!("Enabled ({})", self.clamd_socket)
+            } else {
+                "Disabled".into()
+            }
+        );
+        tracing::info!(
+            "GitHub Sync: {}",
+            if self.github_enabled() {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
+        );
+        tracing::info!(
+            "Admin User: {}",
+            self.admin_username.as_deref().unwrap_or("None")
+        );
         tracing::info!("Log Format: {}", self.log_format);
-        tracing::info!("Max Upload: {} MB", self.max_upload_body_bytes / 1024 / 1024);
+        tracing::info!(
+            "Max Upload: {} MB",
+            self.max_upload_body_bytes / 1024 / 1024
+        );
         tracing::info!("Max Chart: {} MB", self.max_chart_file_bytes / 1024 / 1024);
         tracing::info!("───────────────────────────────────────────────────────────");
     }
 
     pub fn validate(&self) -> Result<(), String> {
         // ── 1. Database URL ──────────────────────────────────────────────────
-        if !self.database_url.starts_with("postgres://") && !self.database_url.starts_with("postgresql://") {
+        if !self.database_url.starts_with("postgres://")
+            && !self.database_url.starts_with("postgresql://")
+        {
             return Err("DATABASE_URL must be a postgres:// or postgresql:// URL".into());
         }
 
@@ -187,28 +214,42 @@ impl Config {
         let check_dir = |path: &str, label: &str| {
             let p = std::path::Path::new(path);
             if !p.exists() {
-                std::fs::create_dir_all(p).map_err(|e| format!("Failed to create {label} directory '{path}': {e}"))?;
+                std::fs::create_dir_all(p)
+                    .map_err(|e| format!("Failed to create {label} directory '{path}': {e}"))?;
             }
             // Check writeability by creating/removing a temp file
             let temp = p.join(".write_test");
-            std::fs::write(&temp, "ok").map_err(|e| format!("{label} directory '{path}' is not writable: {e}"))?;
+            std::fs::write(&temp, "ok")
+                .map_err(|e| format!("{label} directory '{path}' is not writable: {e}"))?;
             let _ = std::fs::remove_file(temp);
             Ok::<(), String>(())
         };
 
         check_dir(&self.charts_storage_path, "Charts Storage")?;
         check_dir(&self.temp_upload_dir, "Temporary Upload")?;
+        check_dir("/data", "Data")?;
+        check_dir("/tmp/helm-uploads", "Temporary Upload Mount")?;
 
         // ── 3. Frontend Origin ───────────────────────────────────────────────
-        if !self.frontend_origin.starts_with("http://") && !self.frontend_origin.starts_with("https://") {
-            return Err(format!("FRONTEND_ORIGIN '{}' must start with http:// or https://", self.frontend_origin));
+        if !self.frontend_origin.starts_with("http://")
+            && !self.frontend_origin.starts_with("https://")
+        {
+            return Err(format!(
+                "FRONTEND_ORIGIN '{}' must start with http:// or https://",
+                self.frontend_origin
+            ));
         }
 
         // ── 4. GitHub validation if enabled ──────────────────────────────────
         if self.github_enabled() {
-             if !self.github_redirect_uri.as_ref().unwrap().starts_with("http") {
-                 return Err("GITHUB_REDIRECT_URI must be an absolute URL".into());
-             }
+            if !self
+                .github_redirect_uri
+                .as_ref()
+                .unwrap()
+                .starts_with("http")
+            {
+                return Err("GITHUB_REDIRECT_URI must be an absolute URL".into());
+            }
         }
 
         Ok(())

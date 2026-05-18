@@ -1,8 +1,8 @@
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use opentelemetry::{global, metrics::Gauge};
 use std::time::Duration;
 use tokio::time;
-use opentelemetry::{global, metrics::Gauge};
 
 use crate::AppState;
 use crate::schema::{artifact_versions, artifacts, users};
@@ -21,7 +21,7 @@ struct TotalStorage {
 /// Starts a background loop that updates global system metrics every minute.
 pub async fn start_background_metrics(state: AppState) {
     let mut interval = time::interval(Duration::from_secs(60));
-    
+
     // Create OTEL instruments
     let meter = global::meter("helm-hub-backend");
     let otel_artifacts = meter.f64_gauge(METRIC_ARTIFACTS_TOTAL).build();
@@ -31,7 +31,15 @@ pub async fn start_background_metrics(state: AppState) {
 
     loop {
         interval.tick().await;
-        if let Err(e) = update_metrics(&state, &otel_artifacts, &otel_versions, &otel_users, &otel_storage).await {
+        if let Err(e) = update_metrics(
+            &state,
+            &otel_artifacts,
+            &otel_versions,
+            &otel_users,
+            &otel_storage,
+        )
+        .await
+        {
             tracing::error!(error = %e, "Failed to update background metrics");
         }
     }
@@ -44,7 +52,11 @@ async fn update_metrics(
     otel_users: &Gauge<f64>,
     otel_storage: &Gauge<f64>,
 ) -> Result<(), crate::error::AppError> {
-    let mut conn = state.db.get().await.map_err(|e| crate::error::AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| crate::error::AppError::Pool(e.to_string()))?;
 
     // 1. Artifact Count
     let artifact_count: i64 = artifacts::table.count().get_result(&mut conn).await?;
@@ -52,7 +64,10 @@ async fn update_metrics(
     otel_artifacts.record(artifact_count as f64, &[]);
 
     // 2. Version Count
-    let version_count: i64 = artifact_versions::table.count().get_result(&mut conn).await?;
+    let version_count: i64 = artifact_versions::table
+        .count()
+        .get_result(&mut conn)
+        .await?;
     metrics::gauge!(METRIC_VERSIONS_TOTAL).set(version_count as f64);
     otel_versions.record(version_count as f64, &[]);
 
@@ -62,11 +77,12 @@ async fn update_metrics(
     otel_users.record(user_count as f64, &[]);
 
     // 4. Total Storage Usage
-    let total_storage: Option<i64> = diesel::sql_query("SELECT SUM(storage_usage_bytes)::BIGINT as sum FROM users")
-        .get_result::<TotalStorage>(&mut conn)
-        .await?
-        .sum;
-        
+    let total_storage: Option<i64> =
+        diesel::sql_query("SELECT SUM(storage_usage_bytes)::BIGINT as sum FROM users")
+            .get_result::<TotalStorage>(&mut conn)
+            .await?
+            .sum;
+
     let storage_val = total_storage.unwrap_or(0);
     metrics::gauge!(METRIC_STORAGE_BYTES_TOTAL).set(storage_val as f64);
     otel_storage.record(storage_val as f64, &[]);

@@ -32,7 +32,10 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::{RlsConn, models::{GithubConnection, GithubRepo, NewGithubConnection, NewGithubRepo, User}},
+    db::{
+        RlsConn,
+        models::{GithubConnection, GithubRepo, NewGithubConnection, NewGithubRepo, User},
+    },
     error::AppError,
     schema::{github_connections, github_repos, users},
     services::{audit::audit, github_sync, token_crypto},
@@ -364,7 +367,11 @@ pub async fn get_connection(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     let connection = github_connections::table
         .filter(github_connections::user_id.eq(&user_id))
         .select(GithubConnection::as_select())
@@ -384,10 +391,15 @@ pub async fn delete_connection(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
-    let n = diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&user_id)))
-        .execute(&mut conn)
-        .await?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
+    let n =
+        diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&user_id)))
+            .execute(&mut conn)
+            .await?;
 
     if n > 0 {
         let _ = audit(
@@ -402,8 +414,7 @@ pub async fn delete_connection(
     }
 
     Ok(StatusCode::NO_CONTENT)
-    }
-
+}
 
 // ── GET /api/github/repos ─────────────────────────────────────────────────────
 
@@ -414,7 +425,11 @@ pub async fn list_repos(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     let repos = github_repos::table
         .filter(github_repos::user_id.eq(&user_id))
         .select(GithubRepo::as_select())
@@ -447,7 +462,11 @@ pub async fn add_repo(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
 
     let gh_conn = github_connections::table
         .filter(github_connections::user_id.eq(&user_id))
@@ -503,7 +522,11 @@ pub async fn remove_repo(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     let deleted = diesel::delete(
         github_repos::table
             .filter(github_repos::id.eq(&id))

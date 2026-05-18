@@ -12,7 +12,10 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::{generate_api_token, hash_api_token, jwt::Claims},
-    db::{RlsConn, models::{ApiToken, NewApiToken}},
+    db::{
+        RlsConn,
+        models::{ApiToken, NewApiToken},
+    },
     error::AppError,
     schema::api_tokens,
     services::audit::audit,
@@ -141,7 +144,6 @@ pub async fn delete_token(
     )
     .execute(&mut conn)
     .await?;
-
 
     if n == 0 {
         return Err(AppError::NotFound("Token not found".into()));

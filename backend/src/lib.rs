@@ -15,6 +15,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{any, delete, get, post},
 };
+use config::Config;
 use metrics_exporter_prometheus::PrometheusHandle;
 use tower_http::{
     compression::CompressionLayer,
@@ -22,7 +23,6 @@ use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
-use config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -36,13 +36,18 @@ async fn not_found() -> impl IntoResponse {
     axum::http::StatusCode::NOT_FOUND
 }
 
-async fn spa_index(axum::extract::State(state): axum::extract::State<AppState>) -> impl IntoResponse {
+async fn spa_index(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
     let path = std::path::Path::new(&state.config.static_assets_path).join("index.html");
     match tokio::fs::read_to_string(path).await {
         Ok(html) => Html(html).into_response(),
         Err(err) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to read SPA entrypoint (static_assets_path: {}): {err}", state.config.static_assets_path),
+            format!(
+                "Failed to read SPA entrypoint (static_assets_path: {}): {err}",
+                state.config.static_assets_path
+            ),
         )
             .into_response(),
     }
@@ -77,6 +82,10 @@ pub fn app(state: AppState) -> Router {
             axum::http::header::CONTENT_TYPE,
         ]);
 
+    let probe_routes = Router::new()
+        .route("/healthz", get(api::k8s::healthz))
+        .route("/readyz", get(api::k8s::readyz));
+
     let public_routes = Router::new()
         .route("/api/settings", get(api::settings::get_settings))
         .route("/api/telemetry/faro", post(api::telemetry::faro_proxy))
@@ -87,7 +96,10 @@ pub fn app(state: AppState) -> Router {
             get(api::github::oauth_callback),
         )
         .route("/api/artifacts", get(api::artifacts::list_artifacts))
-        .route("/api/artifacts/{owner}", get(api::artifacts::list_user_artifacts))
+        .route(
+            "/api/artifacts/{owner}",
+            get(api::artifacts::list_user_artifacts),
+        )
         .route(
             "/api/artifacts/{owner}/index.yaml",
             get(api::artifacts::artifact_repo_index),
@@ -141,7 +153,10 @@ pub fn app(state: AppState) -> Router {
     let authed_routes = Router::new()
         .route("/api/auth/totp/setup", post(api::auth::totp_setup))
         .route("/api/auth/totp/enable", post(api::auth::totp_enable))
-        .route("/api/artifacts/{owner}", post(api::artifacts::upload_artifact))
+        .route(
+            "/api/artifacts/{owner}",
+            post(api::artifacts::upload_artifact),
+        )
         .route(
             "/api/artifacts/{owner}/{chart_name}",
             delete(api::artifacts::purge_artifact),
@@ -179,13 +194,23 @@ pub fn app(state: AppState) -> Router {
     let spa_routes = Router::new()
         .route("/api", any(not_found))
         .route("/api/{*path}", any(not_found))
-        .nest_service("/assets", ServeDir::new(format!("{}/assets", state.config.static_assets_path)))
-        .route_service("/favicon.svg", ServeFile::new(format!("{}/favicon.svg", state.config.static_assets_path)))
-        .route_service("/icons.svg", ServeFile::new(format!("{}/icons.svg", state.config.static_assets_path)))
+        .nest_service(
+            "/assets",
+            ServeDir::new(format!("{}/assets", state.config.static_assets_path)),
+        )
+        .route_service(
+            "/favicon.svg",
+            ServeFile::new(format!("{}/favicon.svg", state.config.static_assets_path)),
+        )
+        .route_service(
+            "/icons.svg",
+            ServeFile::new(format!("{}/icons.svg", state.config.static_assets_path)),
+        )
         .route("/", get(spa_index))
         .fallback(get(spa_index));
 
     Router::new()
+        .merge(probe_routes)
         .merge(public_routes.layer(cors.clone()))
         .merge(authed_routes.layer(cors.clone()))
         .merge(admin_routes.layer(cors))

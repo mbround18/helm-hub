@@ -122,42 +122,46 @@ async fn record_failed_login(state: &AppState, username: &str) {
     let key = login_attempt_key(username);
     let window = login_window();
 
-    let Ok(mut conn) = state.db.get().await else { return };
+    let Ok(mut conn) = state.db.get().await else {
+        return;
+    };
 
-    let _ = conn.transaction::<(), AppError, _>(async |conn| {
-        use rate_limit_windows::dsl::{
-            count, key as key_col, rate_limit_windows as table, window_start,
-        };
+    let _ = conn
+        .transaction::<(), AppError, _>(async |conn| {
+            use rate_limit_windows::dsl::{
+                count, key as key_col, rate_limit_windows as table, window_start,
+            };
 
-        let existing = table
-            .find(&key)
-            .select((count, window_start))
-            .first::<(i32, DateTime<Utc>)>(conn)
-            .await
-            .optional()?;
+            let existing = table
+                .find(&key)
+                .select((count, window_start))
+                .first::<(i32, DateTime<Utc>)>(conn)
+                .await
+                .optional()?;
 
-        match existing {
-            None => {
-                diesel::insert_into(table)
-                    .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
-                    .execute(conn)
-                    .await?;
+            match existing {
+                None => {
+                    diesel::insert_into(table)
+                        .values((key_col.eq(&key), count.eq(1), window_start.eq(&window)))
+                        .execute(conn)
+                        .await?;
+                }
+                Some((_, ws)) if ws < window => {
+                    diesel::update(table.find(&key))
+                        .set((count.eq(1), window_start.eq(&window)))
+                        .execute(conn)
+                        .await?;
+                }
+                Some((c, _)) => {
+                    diesel::update(table.find(&key))
+                        .set(count.eq(c + 1))
+                        .execute(conn)
+                        .await?;
+                }
             }
-            Some((_, ws)) if ws < window => {
-                diesel::update(table.find(&key))
-                    .set((count.eq(1), window_start.eq(&window)))
-                    .execute(conn)
-                    .await?;
-            }
-            Some((c, _)) => {
-                diesel::update(table.find(&key))
-                    .set(count.eq(c + 1))
-                    .execute(conn)
-                    .await?;
-            }
-        }
-        Ok(())
-    }).await;
+            Ok(())
+        })
+        .await;
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────
@@ -179,7 +183,11 @@ pub async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, AppError> {
     {
-        let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+        let mut conn = state
+            .db
+            .get()
+            .await
+            .map_err(|e| AppError::Pool(e.to_string()))?;
         if !settings::signup_enabled(&mut conn).await {
             return Err(AppError::Forbidden(
                 "Registration is currently disabled".into(),
@@ -202,7 +210,11 @@ pub async fn register(
     let hash = hash_password(&req.password)?;
     let new_user = NewUser::new(req.username, req.email, hash);
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     diesel::insert_into(users::table)
         .values(&new_user)
         .execute(&mut conn)
@@ -249,7 +261,11 @@ pub async fn login(
     // Check failed-login counter before touching the DB for the user record.
     check_failed_logins(&state, &req.username).await?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
 
     // Use a constant-time-friendly error: same message for "no such user" and
     // "wrong password" to prevent username enumeration.
@@ -342,7 +358,11 @@ pub async fn totp_setup(
     let secret = generate_secret();
     let uri = provisioning_uri(&claims.username, &secret, "HelmHub")?;
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     let user_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
     diesel::update(users::table.filter(users::id.eq(&user_id)))
         .set(&UpdateUser {
@@ -368,7 +388,11 @@ pub async fn totp_enable(
     claims: axum::extract::Extension<Claims>,
     Json(req): Json<TotpVerifyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     let user_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
 
     let user: User = users::table
@@ -440,9 +464,9 @@ mod tests {
     fn test_validate_email() {
         assert!(validate_email("user@example.com").is_ok());
         assert!(validate_email("u@e.c").is_ok());
-        
+
         assert!(validate_email("no-at-sign").is_err());
         assert!(validate_email("@starts-with-at.com").is_err());
-        assert!(validate_email(&( "a".repeat(255) + "@b.c")).is_err());
+        assert!(validate_email(&("a".repeat(255) + "@b.c")).is_err());
     }
 }

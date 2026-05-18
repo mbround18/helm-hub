@@ -1,12 +1,11 @@
 /// Kubernetes operational endpoints.
 ///
-/// Mount these at `/k8s/*` — they must be outside the auth middleware and
-/// ideally on a separate network interface in production (e.g. via a second
-/// Axum listener on port 9090 bound to 127.0.0.1 only).
+/// These are mounted on the management listener (port 9090) and mirrored on
+/// the public listener so probes can hit either port without auth.
 ///
-///   GET /k8s/healthz  — liveness probe  (is the process alive?)
-///   GET /k8s/readyz   — readiness probe (can the process serve traffic?)
-///   GET /k8s/metrics  — Prometheus text exposition format
+///   GET /healthz  — liveness probe  (is the process alive?)
+///   GET /readyz   — readiness probe (can the process serve traffic?)
+///   GET /metrics  — Prometheus text exposition format
 use axum::{
     Json,
     extract::State,
@@ -103,7 +102,9 @@ async fn check_storage(path: &str) -> Result<(), std::io::Error> {
 ///
 /// Scraped by your Prometheus instance or the OTel Collector's
 /// `prometheus_simple` receiver.
-pub async fn metrics_handler(axum::extract::State(state): axum::extract::State<AppState>) -> impl IntoResponse {
+pub async fn metrics_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
     let body = state.metrics.render();
     (
         [(
