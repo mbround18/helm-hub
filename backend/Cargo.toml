@@ -33,8 +33,9 @@ deadpool = "0.13.0"
 
 # Auth
 argon2 = "0.5.3"
-rand_core = "0.6.4"
-jsonwebtoken = { version = "10.3.0", default-features = false, features = [
+rand_core = "0.10.1"
+rand_core_06 = { package = "rand_core", version = "0.6.4", features = ["getrandom"] }
+jsonwebtoken = { version = "10.4.0", default-features = false, features = [
   "rust_crypto",
 ] }
 totp-rs = { version = "5.7.1", features = ["qr"] }
@@ -73,6 +74,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 # Error handling
 thiserror = "2.0.18"
 anyhow = "1.0.102"
+async-trait = "0.1.86"
 
 # Config / env
 dotenvy = "0.15.7"
@@ -80,10 +82,11 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = [
   "env-filter",
   "registry",
+  "json",
 ] }
 
 # Metrics — Prometheus scrape endpoint
-metrics = "0.24.5"
+metrics = "0.24.6"
 metrics-exporter-prometheus = "0.18.3"
 
 # OpenTelemetry — optional OTLP export (activated when OTEL_EXPORTER_OTLP_ENDPOINT is set)
@@ -103,7 +106,7 @@ tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
 crc32fast = "1.5.0"
 futures-util = "0.3.32"
-metrics-util = "0.20.3"
+metrics-util = "0.20.4"
 
 [dev-dependencies]
 axum-test = "20.0.0"

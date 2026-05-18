@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod chart_extractor;
 pub mod clamav;
 pub mod github_sync;

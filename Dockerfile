@@ -97,6 +97,8 @@ RUN apt-get update && apt-get install -y \
     # TLS certificates (freshclam contacts the update mirrors over HTTPS)
     ca-certificates \
     libpq5 \
+    glibc-source \
+    libc6 \    
     && rm -rf /var/lib/apt/lists/*
 
 # ── ClamAV configuration ──────────────────────────────────────────────────────
@@ -158,9 +160,10 @@ ENV DATABASE_URL=/data/helm-hub.db \
     CLAMAV_ENABLED=true \
     HOST=0.0.0.0 \
     PORT=3000 \
+    MGMT_PORT=9090 \
     RUST_LOG=helm_hub_backend=info,tower_http=info
 
-EXPOSE 3000
+EXPOSE 3000 9090
 
 # tini as PID 1 — forwards signals and reaps zombie processes created when
 # we background clamd in the entrypoint.

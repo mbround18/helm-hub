@@ -23,6 +23,7 @@ services:
         VITE_OTEL_COLLECTOR_ENDPOINT: ${OTEL_COLLECTOR_ENDPOINT:-}
     ports:
       - "3000:3000"
+      - "9090:9090"
     depends_on:
       db:
         condition: service_healthy
@@ -37,6 +38,7 @@ services:
       CLAMAV_ENABLED: "true"
       HOST: 0.0.0.0
       PORT: 3000
+      MGMT_PORT: 9090
       RUST_LOG: helm_hub_backend=info,tower_http=info
       OTEL_COLLECTOR_ENDPOINT: ${OTEL_COLLECTOR_ENDPOINT:-}
       VITE_FARO_URL: ${VITE_FARO_URL:-}
@@ -44,7 +46,7 @@ services:
     volumes:
       - helm_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/charts || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/readyz || exit 1"]
       interval: 15s
       timeout: 5s
       start_period: 90s # allow time for freshclam + clamd startup

@@ -18,29 +18,11 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::models::{AdminUpdateUser, NewAuditLog, User, Artifact, ArtifactVersion},
+    db::{RlsConn, models::{AdminUpdateUser, User, Artifact, ArtifactVersion}},
     error::AppError,
-    schema::{audit_logs, artifact_versions, artifacts, users},
-    services::settings,
+    schema::{artifact_versions, artifacts, users},
+    services::{audit::audit, settings},
 };
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-async fn audit(
-    conn: &mut crate::db::DbConn,
-    admin_id: Option<Uuid>,
-    action: &str,
-    target_type: &str,
-    target_id: Option<Uuid>,
-    meta: Option<serde_json::Value>,
-) -> Result<(), AppError> {
-    let log = NewAuditLog::new(admin_id, action, target_type, target_id, meta.unwrap_or(serde_json::json!({})));
-    diesel::insert_into(audit_logs::table)
-        .values(&log)
-        .execute(conn)
-        .await?;
-    Ok(())
-}
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 
@@ -72,10 +54,10 @@ impl From<User> for UserSummary {
 }
 
 pub async fn list_users(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Extension(_claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
 ) -> Result<Json<Vec<UserSummary>>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let all: Vec<User> = users::table
         .select(User::as_select())
         .order(users::created_at.asc())
@@ -87,11 +69,12 @@ pub async fn list_users(
 // ── POST /api/admin/users/:id/promote ────────────────────────────────────────
 
 pub async fn promote_user(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
     let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     let updated = diesel::update(users::table.filter(users::id.eq(&id)))
@@ -115,8 +98,9 @@ pub async fn promote_user(
 // ── POST /api/admin/users/:id/ban ────────────────────────────────────────────
 
 pub async fn ban_user(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let admin_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
@@ -124,7 +108,7 @@ pub async fn ban_user(
         return Err(AppError::BadRequest("Cannot ban yourself".into()));
     }
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
     let now = Utc::now();
 
     let updated = diesel::update(users::table.filter(users::id.eq(&id)))
@@ -148,8 +132,9 @@ pub async fn ban_user(
 // ── DELETE /api/admin/users/:id ───────────────────────────────────────────────
 
 pub async fn purge_user(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let admin_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
@@ -157,7 +142,7 @@ pub async fn purge_user(
         return Err(AppError::BadRequest("Cannot purge yourself".into()));
     }
 
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
 
     let user: User = users::table
         .filter(users::id.eq(&id))
@@ -195,11 +180,12 @@ pub async fn purge_user(
 // ── DELETE /api/admin/artifacts/:owner/:chart_name ───────────────────────────────
 
 pub async fn delete_any_artifact(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path((owner, chart_name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
     let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     // Resolve owner username → user_id.
@@ -269,12 +255,13 @@ pub struct SetQuotaBody {
 }
 
 pub async fn set_user_quota(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path(id): Path<Uuid>,
     Json(body): Json<SetQuotaBody>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
     let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     let updated = diesel::update(users::table.filter(users::id.eq(&id)))
@@ -313,11 +300,12 @@ pub struct UpdateSettingsBody {
 }
 
 pub async fn update_settings(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Json(body): Json<UpdateSettingsBody>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
     let admin_id = Uuid::parse_str(&claims.sub).ok();
 
     if let Some(ref name) = body.app_name {

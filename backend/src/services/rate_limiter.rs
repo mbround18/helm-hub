@@ -27,7 +27,7 @@ pub async fn rate_limit(
     req: Request,
     next: Next,
 ) -> Response {
-    let (key, limit) = classify(&req, &addr);
+    let (key, limit) = classify(&state, &req, &addr);
 
     if check_and_increment(&state, &key, limit).await {
         next.run(req).await
@@ -54,10 +54,12 @@ pub async fn rate_limit(
 /// Returns `(rate_limit_key, limit)` for this request.
 ///
 /// Authenticated (Bearer token) callers are keyed by a truncated hash of the
-/// raw token value and receive the higher limit.  All other callers are keyed
-/// by their actual TCP remote address — we deliberately ignore X-Forwarded-For
-/// and X-Real-IP because those headers are trivially spoofable by any client.
-fn classify(req: &Request, remote_addr: &SocketAddr) -> (String, i32) {
+/// raw token value and receive the higher limit.
+///
+/// For anonymous callers:
+/// - If `TRUST_PROXY` is enabled, we use the first IP from `X-Forwarded-For`.
+/// - Otherwise, we use the actual TCP remote address.
+fn classify(state: &AppState, req: &Request, remote_addr: &SocketAddr) -> (String, i32) {
     if let Some(auth) = req.headers().get("authorization")
         && let Ok(val) = auth.to_str()
         && let Some(token) = val.strip_prefix("Bearer ") {
@@ -72,7 +74,20 @@ fn classify(req: &Request, remote_addr: &SocketAddr) -> (String, i32) {
         return (key, AUTH_LIMIT);
     }
 
-    // Use the real TCP peer address — not any header the client can forge.
+    // ── Anonymous Caller ─────────────────────────────────────────────────────
+    
+    // If we trust the proxy, try to get the real client IP from the forwarded header.
+    if state.config.trust_proxy {
+        if let Some(forwarded) = req.headers().get("x-forwarded-for")
+            && let Ok(s) = forwarded.to_str() {
+            // X-Forwarded-For can be a comma-separated list; the first one is the client.
+            if let Some(ip) = s.split(',').next().map(|s| s.trim()) {
+                return (format!("ip:{ip}"), ANON_LIMIT);
+            }
+        }
+    }
+
+    // Fallback to the real TCP peer address.
     (format!("ip:{}", remote_addr.ip()), ANON_LIMIT)
 }
 

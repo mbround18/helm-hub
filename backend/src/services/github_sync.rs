@@ -61,6 +61,7 @@ pub struct SyncReport {
 /// chart versions, and returns a detailed report.
 pub async fn sync_repo(
     state: &AppState,
+    conn: &mut crate::db::DbConn,
     repo: &GithubRepo,
     access_token: &str,
     user: &User,
@@ -108,6 +109,7 @@ pub async fn sync_repo(
 
             let entry = download_and_import(
                 state,
+                conn,
                 access_token,
                 &asset.browser_download_url,
                 &asset.name,
@@ -122,11 +124,10 @@ pub async fn sync_repo(
     }
 
     // Update last_synced_at
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
     let now = Utc::now();
     diesel::update(github_repos::table.find(&repo.id))
         .set(github_repos::last_synced_at.eq(Some(now)))
-        .execute(&mut conn)
+        .execute(conn)
         .await?;
 
     Ok(SyncReport {
@@ -210,6 +211,7 @@ async fn fetch_releases(
 
 async fn download_and_import(
     state: &AppState,
+    conn: &mut crate::db::DbConn,
     token: &str,
     download_url: &str,
     asset_name: &str,
@@ -254,7 +256,15 @@ async fn download_and_import(
         return make_failed(format!("Failed to write temp file: {e}"));
     }
 
-    let result = scan_and_persist(state, &user.id.to_string(), &user.username, &bytes, &temp_path).await;
+    let result = scan_and_persist(
+        state,
+        conn,
+        &user.id.to_string(),
+        &user.username,
+        &bytes,
+        &temp_path,
+    )
+    .await;
 
     if let Err(e) = tokio::fs::remove_file(&temp_path).await {
         tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove sync temp file");

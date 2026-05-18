@@ -26,20 +26,23 @@ impl Drop for TelemetryGuard {
     }
 }
 
-pub fn init(service_name: &'static str) -> (TelemetryGuard, PrometheusHandle) {
+pub fn init(service_name: &'static str, log_format: &str) -> (TelemetryGuard, PrometheusHandle) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("helm_hub_backend=info,tower_http=info"));
 
     match std::env::var("OTEL_COLLECTOR_ENDPOINT") {
-        Ok(endpoint) => init_with_otel(service_name, endpoint, filter),
+        Ok(endpoint) => init_with_otel(service_name, endpoint, log_format, filter),
         Err(_) => {
             let builder = PrometheusBuilder::new();
             let handle = builder.install_recorder().expect("Failed to install Prometheus recorder");
 
-            tracing_subscriber::registry()
-                .with(filter)
-                .with(tracing_subscriber::fmt::layer())
-                .init();
+            let registry = tracing_subscriber::registry().with(filter);
+
+            if log_format == "json" {
+                registry.with(tracing_subscriber::fmt::layer().json()).init();
+            } else {
+                registry.with(tracing_subscriber::fmt::layer()).init();
+            }
             
             (TelemetryGuard {
                 tracer_provider: None,
@@ -52,6 +55,7 @@ pub fn init(service_name: &'static str) -> (TelemetryGuard, PrometheusHandle) {
 fn init_with_otel(
     service_name: &'static str,
     endpoint: String,
+    log_format: &str,
     filter: EnvFilter,
 ) -> (TelemetryGuard, PrometheusHandle) {
     let resource = Resource::builder()
@@ -125,11 +129,15 @@ fn init_with_otel(
         opentelemetry::trace::TracerProvider::tracer(&tracer_provider, service_name)
     );
 
-    tracing_subscriber::registry()
+    let registry = tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .with(otel_layer)
-        .init();
+        .with(otel_layer);
+
+    if log_format == "json" {
+        registry.with(tracing_subscriber::fmt::layer().json()).init();
+    } else {
+        registry.with(tracing_subscriber::fmt::layer()).init();
+    }
 
     tracing::info!(%endpoint, "OpenTelemetry OTLP export active");
 

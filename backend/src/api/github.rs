@@ -32,10 +32,10 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::models::{GithubConnection, GithubRepo, NewGithubConnection, NewGithubRepo, User},
+    db::{RlsConn, models::{GithubConnection, GithubRepo, NewGithubConnection, NewGithubRepo, User}},
     error::AppError,
     schema::{github_connections, github_repos, users},
-    services::{github_sync, token_crypto},
+    services::{audit::audit, github_sync, token_crypto},
 };
 
 // ── OAuth state JWT ───────────────────────────────────────────────────────────
@@ -308,8 +308,8 @@ pub async fn oauth_callback(
             )
             .set((
                 github_connections::github_access_token.eq(&encrypted_token),
-                github_connections::github_username.eq(&gh_user.login),
-                github_connections::avatar_url.eq(&gh_user.avatar_url),
+                github_connections::github_username.eq(gh_user.login.clone()),
+                github_connections::avatar_url.eq(gh_user.avatar_url.clone()),
                 github_connections::updated_at.eq(&now),
             ))
             .execute(&mut conn)
@@ -323,9 +323,9 @@ pub async fn oauth_callback(
             let new_conn = NewGithubConnection::new(
                 oauth_state.user_id,
                 github_id,
-                gh_user.login,
+                gh_user.login.clone(),
                 encrypted_token,
-                gh_user.avatar_url,
+                gh_user.avatar_url.clone(),
             );
             if let Err(e) = diesel::insert_into(github_connections::table)
                 .values(&new_conn)
@@ -341,6 +341,16 @@ pub async fn oauth_callback(
             return redirect_err(return_to);
         }
     }
+
+    let _ = audit(
+        &mut conn,
+        Some(oauth_state.user_id),
+        "link_github",
+        "github_connection",
+        None,
+        Some(serde_json::json!({ "github_username": gh_user.login })),
+    )
+    .await;
 
     Redirect::to(&format!("{return_to}?github=connected"))
 }
@@ -375,11 +385,25 @@ pub async fn delete_connection(
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
 
     let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
-    diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&user_id)))
+    let n = diesel::delete(github_connections::table.filter(github_connections::user_id.eq(&user_id)))
         .execute(&mut conn)
         .await?;
+
+    if n > 0 {
+        let _ = audit(
+            &mut conn,
+            Some(user_id),
+            "unlink_github",
+            "github_connection",
+            None,
+            None,
+        )
+        .await;
+    }
+
     Ok(StatusCode::NO_CONTENT)
-}
+    }
+
 
 // ── GET /api/github/repos ─────────────────────────────────────────────────────
 
@@ -453,6 +477,19 @@ pub async fn add_repo(
         .first(&mut conn)
         .await?;
 
+    let _ = audit(
+        &mut conn,
+        Some(user_id),
+        "add_github_repo",
+        "github_repo",
+        Some(inserted.id),
+        Some(serde_json::json!({
+            "owner": inserted.repo_owner,
+            "name": inserted.repo_name,
+        })),
+    )
+    .await;
+
     Ok((StatusCode::CREATED, Json(inserted)))
 }
 
@@ -475,23 +512,32 @@ pub async fn remove_repo(
     .execute(&mut conn)
     .await?;
 
-    if deleted == 0 {
-        return Err(AppError::NotFound("Repository not found".into()));
+    if deleted > 0 {
+        let _ = audit(
+            &mut conn,
+            Some(user_id),
+            "remove_github_repo",
+            "github_repo",
+            Some(id),
+            None,
+        )
+        .await;
     }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
 // ── POST /api/github/repos/:id/sync ──────────────────────────────────────────
 
 pub async fn sync_repo(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path(id): Path<Uuid>,
 ) -> Result<Json<github_sync::SyncReport>, AppError> {
+    let state = state.0;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     let repo = github_repos::table
         .filter(github_repos::id.eq(&id))
@@ -520,9 +566,21 @@ pub async fn sync_repo(
         &state.config.token_encryption_key,
     )?;
 
-    drop(conn);
+    let report = github_sync::sync_repo(&state, &mut conn, &repo, &access_token, &user).await?;
 
-    let report = github_sync::sync_repo(&state, &repo, &access_token, &user).await?;
+    let _ = audit(
+        &mut conn,
+        Some(user_id),
+        "sync_github_repo",
+        "github_repo",
+        Some(repo.id),
+        Some(serde_json::json!({
+            "repo": format!("{}/{}", repo.repo_owner, repo.repo_name),
+            "imported": report.entries.iter().filter(|e| e.status == "imported").count(),
+            "failed": report.entries.iter().filter(|e| e.status == "failed").count(),
+        })),
+    )
+    .await;
 
     Ok(Json(report))
 }

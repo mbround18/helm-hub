@@ -54,10 +54,11 @@ struct FailedArtifact {
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::models::{Artifact, ArtifactVersion, NewArtifact, NewArtifactVersion},
+    db::{RlsConn, models::{Artifact, ArtifactVersion, NewArtifact, NewArtifactVersion}},
     error::AppError,
     schema::{artifact_versions, artifacts, users},
     services::{
+        audit::audit,
         chart_extractor::{extract_chart_metadata, parse_chart_yaml, persist_chart},
         clamav::{ScanOutcome, scan_file},
         quota,
@@ -80,13 +81,15 @@ use crate::{
 ///   curl -X POST -H "Authorization: Bearer $TOKEN" \
 ///        -F "chart=@chart1-1.0.0.tgz" -F "chart=@chart2-2.0.0.tgz" \
 ///        https://hub/api/artifacts/<owner>
-#[tracing::instrument(skip(state, multipart), fields(owner = %owner))]
+#[tracing::instrument(skip(state, multipart, conn), fields(owner = %owner))]
 pub async fn upload_artifact(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path(owner): Path<String>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    let state = &state.0;
     if claims.username != owner {
         return Err(AppError::Forbidden(
             "Cannot upload to another user's namespace".into(),
@@ -141,7 +144,7 @@ pub async fn upload_artifact(
 
         tokio::fs::write(&temp_path, &bytes).await?;
 
-        let outcome = scan_and_persist(&state, &claims.sub, &owner, &bytes, &temp_path).await;
+        let outcome = scan_and_persist(&state, &mut conn, &claims.sub, &owner, &bytes, &temp_path).await;
 
         if let Err(e) = tokio::fs::remove_file(&temp_path).await {
             tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove temp upload file");
@@ -182,11 +185,12 @@ pub async fn upload_artifact(
 /// `user_id_str` is the UUID string of the owning user; `owner` is their username (the
 /// namespace artifacts are stored under).
 #[tracing::instrument(
-    skip(state, bytes),
+    skip(state, bytes, conn),
     fields(owner, artifact.name = tracing::field::Empty, artifact.version = tracing::field::Empty)
 )]
 pub(crate) async fn scan_and_persist(
     state: &crate::AppState,
+    conn: &mut crate::db::DbConn,
     user_id_str: &str,
     owner: &str,
     bytes: &Bytes,
@@ -228,9 +232,8 @@ pub(crate) async fn scan_and_persist(
     // ── Quota check (atomic reserve before touching disk) ─────────────────────
     let artifact_bytes = bytes.len() as i64;
     {
-        let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
         quota::reserve_quota(
-            &mut conn,
+            conn,
             user_id,
             artifact_bytes,
             state.config.default_storage_quota_bytes,
@@ -247,8 +250,6 @@ pub(crate) async fn scan_and_persist(
             return Err(AppError::Io(e));
         }
     };
-
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     // ── Transactional DB update with Advisory Lock ────────────────────────────
     let result = conn.transaction::<UploadedArtifact, AppError, _>(async |conn| {
@@ -333,6 +334,20 @@ pub(crate) async fn scan_and_persist(
             .execute(conn)
             .await?;
 
+        audit(
+            conn,
+            Some(user_id),
+            "upload",
+            "artifact_version",
+            Some(new_version.id),
+            Some(serde_json::json!({
+                "artifact": artifact_name,
+                "version": version,
+                "app_version": app_version,
+            })),
+        )
+        .await?;
+
         Ok(UploadedArtifact {
             artifact: artifact_name.clone(),
             version: version.clone(),
@@ -389,10 +404,11 @@ struct ArtifactWithUsername {
 
 /// `GET /api/artifacts` — public artifact index with optional search
 pub async fn list_artifacts(
-    State(state): State<AppState>,
+    state: State<AppState>,
+    RlsConn(mut conn): RlsConn,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<PublicArtifact>>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
     let per_page = params.per_page.unwrap_or(20).min(100);
     let offset = (params.page.unwrap_or(1) - 1) * per_page;
 
@@ -439,17 +455,18 @@ pub async fn list_artifacts(
 
 /// `GET /api/artifacts/:owner` — all public artifacts for a given user
 pub async fn list_user_artifacts(
-    State(state): State<AppState>,
+    state: State<AppState>,
+    RlsConn(mut conn): RlsConn,
     Path(owner): Path<String>,
 ) -> Result<Json<Vec<Artifact>>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
-
+    let _state = &state.0;
     let user_id: Uuid = users::table
         .filter(users::username.eq(&owner))
         .select(users::id)
         .first(&mut conn)
         .await
         .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+
 
     let results = artifacts::table
         .filter(artifacts::owner_id.eq(user_id))
@@ -465,10 +482,11 @@ pub async fn list_user_artifacts(
 
 /// `GET /api/artifacts/:owner/:artifact_name` — list all versions for an artifact
 pub async fn list_artifact_versions(
-    State(state): State<AppState>,
+    state: State<AppState>,
+    RlsConn(mut conn): RlsConn,
     Path((owner, artifact_name)): Path<(String, String)>,
 ) -> Result<Json<Vec<ArtifactVersion>>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
 
     let user_id: Uuid = users::table
         .filter(users::username.eq(&owner))
@@ -499,10 +517,11 @@ pub async fn list_artifact_versions(
 
 /// `GET /api/artifacts/:owner/:artifact_name/:version/download`
 pub async fn download_artifact(
-    State(state): State<AppState>,
+    state: State<AppState>,
+    RlsConn(mut conn): RlsConn,
     Path((owner, artifact_name, version)): Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let state = &state.0;
 
     let user_id: Uuid = users::table
         .filter(users::username.eq(&owner))
@@ -567,10 +586,12 @@ pub async fn download_artifact(
 /// When the last version of an artifact is removed the artifact record itself is also
 /// deleted so it no longer appears in the owner's artifact list.
 pub async fn delete_artifact_version(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path((owner, artifact_name, version)): Path<(String, String, String)>,
 ) -> Result<StatusCode, AppError> {
+    let state = &state.0;
     if claims.username != owner {
         return Err(AppError::Forbidden(
             "Cannot delete from another user's namespace".into(),
@@ -579,8 +600,6 @@ pub async fn delete_artifact_version(
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     let artifact: Artifact = artifacts::table
         .filter(artifacts::owner_id.eq(user_id))
@@ -615,6 +634,19 @@ pub async fn delete_artifact_version(
         .execute(&mut conn)
         .await?;
 
+    audit(
+        &mut conn,
+        Some(user_id),
+        "delete_version",
+        "artifact_version",
+        Some(av.id),
+        Some(serde_json::json!({
+            "artifact": artifact.name,
+            "version": version,
+        })),
+    )
+    .await?;
+
     // If no versions remain, remove the artifact record too.
     let remaining: i64 = artifact_versions::table
         .filter(artifact_versions::artifact_id.eq(&artifact.id))
@@ -637,10 +669,12 @@ pub async fn delete_artifact_version(
 
 /// `DELETE /api/artifacts/:owner/:artifact_name` — purge all versions and the artifact record.
 pub async fn purge_artifact(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
     Path((owner, artifact_name)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
+    let state = &state.0;
     if claims.username != owner {
         return Err(AppError::Forbidden(
             "Cannot delete from another user's namespace".into(),
@@ -649,8 +683,6 @@ pub async fn purge_artifact(
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
 
     let artifact: Artifact = artifacts::table
         .filter(artifacts::owner_id.eq(user_id))
@@ -694,6 +726,19 @@ pub async fn purge_artifact(
         .execute(&mut conn)
         .await?;
 
+    audit(
+        &mut conn,
+        Some(user_id),
+        "purge_artifact",
+        "artifact",
+        Some(artifact.id),
+        Some(serde_json::json!({
+            "name": artifact.name,
+            "version_count": versions.len(),
+        })),
+    )
+    .await?;
+
     if freed_bytes > 0 {
         quota::release_quota(&state, user_id, freed_bytes).await;
     }
@@ -728,11 +773,12 @@ struct HelmIndex {
 
 /// `GET /api/artifacts/:owner/index.yaml` — Helm repository index for `helm repo add`.
 pub async fn artifact_repo_index(
-    State(state): State<AppState>,
+    state: State<AppState>,
+    RlsConn(mut conn): RlsConn,
     headers: axum::http::HeaderMap,
     Path(owner): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let _state = &state.0;
 
     let user_id: Uuid = users::table
         .filter(users::username.eq(&owner))

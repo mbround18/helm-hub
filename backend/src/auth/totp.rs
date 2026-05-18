@@ -1,5 +1,5 @@
 use base32::{Alphabet, encode};
-use rand_core::{OsRng, RngCore};
+use rand_core_06::{OsRng, RngCore};
 use totp_rs::{Algorithm, Secret, TOTP};
 
 use crate::error::AppError;

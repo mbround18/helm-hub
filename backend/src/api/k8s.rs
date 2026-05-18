@@ -51,6 +51,12 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
         failures.push("clamd_socket_unreachable");
     }
 
+    // ── Storage writeability ──────────────────────────────────────────────────
+    if let Err(e) = check_storage(&state.config.charts_storage_path).await {
+        tracing::warn!(path = %state.config.charts_storage_path, error = %e, "readyz: storage not writable");
+        failures.push("storage_readonly");
+    }
+
     if failures.is_empty() {
         (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
     } else {
@@ -83,13 +89,21 @@ async fn ping_clamd(socket_path: &str) -> bool {
     }
 }
 
+/// Verifies that the storage path is still writable.
+async fn check_storage(path: &str) -> Result<(), std::io::Error> {
+    let temp = std::path::Path::new(path).join(".readyz_test");
+    tokio::fs::write(&temp, "ok").await?;
+    let _ = tokio::fs::remove_file(temp).await;
+    Ok(())
+}
+
 // ── Prometheus metrics ────────────────────────────────────────────────────────
 
 /// Renders all registered metrics in the Prometheus text exposition format.
 ///
 /// Scraped by your Prometheus instance or the OTel Collector's
 /// `prometheus_simple` receiver.
-pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn metrics_handler(axum::extract::State(state): axum::extract::State<AppState>) -> impl IntoResponse {
     let body = state.metrics.render();
     (
         [(

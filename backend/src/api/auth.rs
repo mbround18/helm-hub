@@ -16,7 +16,7 @@ use crate::{
     db::models::{NewUser, UpdateUser, User},
     error::AppError,
     schema::{rate_limit_windows, users},
-    services::settings,
+    services::{audit::audit, settings},
 };
 
 // ── Input validation ──────────────────────────────────────────────────────────
@@ -214,6 +214,16 @@ pub async fn register(
         .first(&mut conn)
         .await?;
 
+    audit(
+        &mut conn,
+        Some(user.id),
+        "register",
+        "user",
+        Some(user.id),
+        None,
+    )
+    .await?;
+
     Ok(Json(RegisterResponse { user }))
 }
 
@@ -304,6 +314,16 @@ pub async fn login(
     );
     let token = encode_jwt(&claims, &state.config.jwt_secret)?;
 
+    audit(
+        &mut conn,
+        Some(user.id),
+        "login",
+        "user",
+        Some(user.id),
+        None,
+    )
+    .await?;
+
     Ok(Json(LoginResponse { token, user }))
 }
 
@@ -374,7 +394,55 @@ pub async fn totp_enable(
         .execute(&mut conn)
         .await?;
 
+    let _ = audit(
+        &mut conn,
+        Some(user_id),
+        "enable_totp",
+        "user",
+        Some(user_id),
+        None,
+    )
+    .await;
+
     Ok(Json(
         serde_json::json!({ "message": "TOTP enabled successfully" }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_username() {
+        // Valid
+        assert!(validate_username("valid-user").is_ok());
+        assert!(validate_username("user123").is_ok());
+        assert!(validate_username("a-b").is_ok());
+        assert!(validate_username("a").is_err()); // Too short
+
+        // Invalid: Length
+        assert!(validate_username("a").is_err());
+        assert!(validate_username(&"a".repeat(40)).is_err());
+
+        // Invalid: Characters
+        assert!(validate_username("user!name").is_err());
+        assert!(validate_username("user_name").is_err());
+        assert!(validate_username("user name").is_err());
+
+        // Invalid: Hyphens
+        assert!(validate_username("-user").is_err());
+        assert!(validate_username("user-").is_err());
+        assert!(validate_username("user--name").is_err());
+    }
+
+    #[test]
+    fn test_validate_email() {
+        assert!(validate_email("user@example.com").is_ok());
+        assert!(validate_email("u@e.c").is_ok());
+        
+        assert!(validate_email("no-at-sign").is_err());
+        assert!(validate_email("@starts-with-at.com").is_err());
+        assert!(validate_email(&( "a".repeat(255) + "@b.c")).is_err());
+    }
 }
