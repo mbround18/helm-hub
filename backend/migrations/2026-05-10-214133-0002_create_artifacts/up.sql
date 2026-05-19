@@ -22,5 +22,6 @@ CREATE POLICY artifact_access_policy ON artifacts
     FOR ALL
     USING (
         is_private = FALSE
-        OR owner_id = current_setting('app.current_user_id', true)::UUID
+        OR (current_setting('app.current_user_id', true) != '' 
+            AND owner_id = current_setting('app.current_user_id', true)::UUID)
     );

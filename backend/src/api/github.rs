@@ -1,9 +1,7 @@
-//! GitHub OAuth App SSO + repository sync handlers.
+//! GitHub OAuth App repository linking + sync handlers.
 //!
-//! Required env vars (all optional — feature is disabled when absent):
-//!   GITHUB_CLIENT_ID      — OAuth App client ID
-//!   GITHUB_CLIENT_SECRET  — OAuth App client secret
-//!   GITHUB_REDIRECT_URI   — Callback URL registered in the GitHub OAuth App
+//! Credentials are now configured in the admin panel and stored in app_settings.
+//! See auth_providers.rs for the configuration keys.
 //!
 //! Security notes:
 //!   - `return_to` is validated to be a same-origin relative path before being
@@ -38,7 +36,7 @@ use crate::{
     },
     error::AppError,
     schema::{github_connections, github_repos, users},
-    services::{audit::audit, github_sync, token_crypto},
+    services::{audit::audit, auth_providers, github_sync, token_crypto},
 };
 
 // ── OAuth state JWT ───────────────────────────────────────────────────────────
@@ -179,12 +177,23 @@ pub async fn oauth_url(
     Extension(claims): Extension<Claims>,
     Query(q): Query<OAuthUrlQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if !state.config.github_enabled() {
-        return Err(github_not_configured());
+    // Get GitHub credentials from admin-configured settings
+    let mut conn = state.db.get().await.map_err(|e| AppError::Internal(format!("DB connection error: {e}")))?;
+
+    let github_enabled = auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITHUB_ENABLED, false).await;
+    if !github_enabled {
+        return Err(AppError::Internal(
+            "GitHub OAuth is not configured on this server.".into(),
+        ));
     }
 
-    let client_id = state.config.github_client_id.as_deref().unwrap();
-    let redirect_uri = state.config.github_redirect_uri.as_deref().unwrap();
+    let client_id = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_CLIENT_ID).await.ok_or_else(|| {
+        AppError::Internal("GitHub client ID not configured".into())
+    })?;
+
+    let redirect_uri = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_REDIRECT_URI).await.ok_or_else(|| {
+        AppError::Internal("GitHub redirect URI not configured".into())
+    })?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
@@ -241,19 +250,40 @@ pub async fn oauth_callback(
 
     let return_to = safe_return_to(Some(&oauth_state.return_to));
 
-    if !state.config.github_enabled() {
+    // Get GitHub credentials from admin-configured settings
+    let mut conn = match state.db.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error = %e, "DB connection error during GitHub oauth_callback");
+            return redirect_err(return_to);
+        }
+    };
+
+    let github_enabled = auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITHUB_ENABLED, false).await;
+    if !github_enabled {
         return redirect_err(return_to);
     }
 
-    let client_id = state.config.github_client_id.as_deref().unwrap();
-    let client_secret = state.config.github_client_secret.as_deref().unwrap();
-    let redirect_uri = state.config.github_redirect_uri.as_deref().unwrap();
+    let client_id = match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_CLIENT_ID).await {
+        Some(id) => id,
+        None => return redirect_err(return_to),
+    };
+
+    let client_secret = match auth_providers::get_secret(&mut conn, auth_providers::KEY_GITHUB_CLIENT_SECRET, &state.config.token_encryption_key).await {
+        Ok(Some(secret)) => secret,
+        _ => return redirect_err(return_to),
+    };
+
+    let redirect_uri = match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_REDIRECT_URI).await {
+        Some(uri) => uri,
+        None => return redirect_err(return_to),
+    };
 
     let access_token = match exchange_code(
         &state.http_client,
-        client_id,
-        client_secret,
-        redirect_uri,
+        &client_id,
+        &client_secret,
+        &redirect_uri,
         &code,
     )
     .await
@@ -283,14 +313,6 @@ pub async fn oauth_callback(
             }
         };
 
-    let mut conn = match state.db.get().await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "DB connection error during OAuth callback");
-            return redirect_err(return_to);
-        }
-    };
-
     let github_id = gh_user.id.to_string();
     let now = Utc::now();
 
@@ -318,7 +340,7 @@ pub async fn oauth_callback(
             .execute(&mut conn)
             .await
             {
-                tracing::error!(error = %e, "DB update error during OAuth callback");
+                tracing::error!(error = %e, "DB update error during GitHub oauth_callback");
                 return redirect_err(return_to);
             }
         }
@@ -335,12 +357,12 @@ pub async fn oauth_callback(
                 .execute(&mut conn)
                 .await
             {
-                tracing::error!(error = %e, "DB insert error during OAuth callback");
+                tracing::error!(error = %e, "DB insert error during GitHub oauth_callback");
                 return redirect_err(return_to);
             }
         }
         Err(e) => {
-            tracing::error!(error = %e, "DB query error during OAuth callback");
+            tracing::error!(error = %e, "DB query error during GitHub oauth_callback");
             return redirect_err(return_to);
         }
     }

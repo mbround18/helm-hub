@@ -1,7 +1,9 @@
 pub mod admin;
 pub mod artifacts;
 pub mod auth;
+pub mod auth_providers;
 pub mod github;
+pub mod gitlab;
 pub mod k8s;
 pub mod settings;
 pub mod telemetry;

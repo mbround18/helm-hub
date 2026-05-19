@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS auth.register_user(TEXT, TEXT, TEXT);

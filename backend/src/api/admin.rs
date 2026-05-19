@@ -24,7 +24,7 @@ use crate::{
     },
     error::AppError,
     schema::{artifact_versions, artifacts, users},
-    services::{audit::audit, settings},
+    services::{audit::audit, auth_providers, settings},
 };
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
@@ -355,6 +355,124 @@ pub async fn update_settings(
         &mut conn,
         admin_id,
         "update_settings",
+        "settings",
+        None,
+        Some(meta),
+    )
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Observability Settings ────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct ObservabilitySettings {
+    pub otel_endpoint: Option<String>,
+    pub grafana_url: Option<String>,
+    pub grafana_configured: bool,
+}
+
+pub async fn get_observability_settings(
+    _state: State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
+) -> Result<Json<ObservabilitySettings>, AppError> {
+    let otel_endpoint = auth_providers::opt_setting(&mut conn, auth_providers::KEY_OTEL_ENDPOINT)
+        .await
+        .filter(|e| !e.is_empty());
+    
+    let grafana_url = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GRAFANA_URL)
+        .await
+        .filter(|u| !u.is_empty());
+    
+    let grafana_configured = grafana_url.is_some()
+        && auth_providers::opt_setting(&mut conn, auth_providers::KEY_GRAFANA_API_TOKEN)
+            .await
+            .is_some();
+
+    Ok(Json(ObservabilitySettings {
+        otel_endpoint,
+        grafana_url,
+        grafana_configured,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateObservabilitySettingsBody {
+    pub otel_endpoint: Option<String>,
+    pub grafana_url: Option<String>,
+    pub grafana_api_token: Option<String>,
+}
+
+pub async fn update_observability_settings(
+    state: State<AppState>,
+    Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
+    Json(body): Json<UpdateObservabilitySettingsBody>,
+) -> Result<StatusCode, AppError> {
+    let admin_id = Uuid::parse_str(&claims.sub).ok();
+    let encryption_key = &state.0.config.token_encryption_key;
+
+    if let Some(ref endpoint) = body.otel_endpoint {
+        let trimmed = endpoint.trim();
+        if !trimmed.is_empty() {
+            // Validate that it's a reasonable URL
+            if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+                return Err(AppError::BadRequest(
+                    "otel_endpoint must be an http/https URL or empty".into(),
+                ));
+            }
+        }
+        settings::set(&mut conn, auth_providers::KEY_OTEL_ENDPOINT, trimmed).await?;
+    }
+
+    if let Some(ref url) = body.grafana_url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            // Validate URL
+            if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+                return Err(AppError::BadRequest(
+                    "grafana_url must be an http/https URL or empty".into(),
+                ));
+            }
+            // Test connection if token is also provided
+            if let Some(ref token) = body.grafana_api_token {
+                let grafana_config = crate::services::observability::GrafanaConfig {
+                    url: trimmed.to_string(),
+                    api_token: token.trim().to_string(),
+                };
+                crate::services::observability::validate_grafana(&state.0.http_client, &grafana_config)
+                    .await?;
+            }
+        }
+        settings::set(&mut conn, auth_providers::KEY_GRAFANA_URL, trimmed).await?;
+    }
+
+    if let Some(ref token) = body.grafana_api_token {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() {
+            // Encrypt and store
+            let encrypted = crate::services::token_crypto::encrypt_token(
+                trimmed,
+                encryption_key,
+            )?;
+            settings::set(&mut conn, auth_providers::KEY_GRAFANA_API_TOKEN, &encrypted).await?;
+        } else {
+            // Clear the token
+            settings::set(&mut conn, auth_providers::KEY_GRAFANA_API_TOKEN, "").await?;
+        }
+    }
+
+    let meta = serde_json::json!({
+        "otel_endpoint": body.otel_endpoint,
+        "grafana_url": body.grafana_url,
+        "grafana_token_set": body.grafana_api_token.is_some(),
+    });
+    audit(
+        &mut conn,
+        admin_id,
+        "update_observability_settings",
         "settings",
         None,
         Some(meta),

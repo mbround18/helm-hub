@@ -25,11 +25,17 @@ const Dashboard = lazy(async () => ({
 const Profile = lazy(async () => ({
   default: (await import("./pages/Profile")).Profile,
 }));
+const ChartPage = lazy(async () => ({
+  default: (await import("./pages/ChartPage")).ChartPage,
+}));
 const Admin = lazy(async () => ({
   default: (await import("./pages/Admin")).Admin,
 }));
 const Login = lazy(async () => ({
   default: (await import("./pages/Login")).Login,
+}));
+const AuthCallback = lazy(async () => ({
+  default: (await import("./pages/AuthCallback")).AuthCallback,
 }));
 const Register = lazy(async () => ({
   default: (await import("./pages/Register")).Register,
@@ -122,10 +128,26 @@ export default function App() {
             }
           />
           <Route
+            path="/auth/callback"
+            element={
+              <Suspense fallback={<AuthPageFallback />}>
+                <AuthCallback />
+              </Suspense>
+            }
+          />
+          <Route
             path="/register"
             element={
               <Suspense fallback={<AuthPageFallback />}>
                 <Register />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/charts/:owner/:name"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <ChartPage />
               </Suspense>
             }
           />

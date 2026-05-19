@@ -4,13 +4,14 @@ import { authApi } from "../lib/api";
 import { AlertCircle, Lock } from "lucide-react";
 import { AppLogo } from "../components/AppLogo";
 import { useSettings } from "../hooks/useSettings";
+import { Seo } from "../components/Seo";
 
 export function Register() {
   const [form, setForm] = useState({ username: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { signup_enabled } = useSettings();
+  const { signup_enabled, local_auth_enabled, app_name } = useSettings();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,13 +29,19 @@ export function Register() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+      <Seo
+        title={`Create account | ${app_name}`}
+        description="Create a Helm Hub account to upload and manage charts."
+        canonical={`${window.location.origin}/register`}
+        robots="noindex,follow"
+      />
       <div className="w-full max-w-sm">
         <div className="flex items-center justify-center text-violet-400 mb-8">
           <AppLogo size="md" />
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          {!signup_enabled ? (
+          {!signup_enabled || !local_auth_enabled ? (
             <div className="text-center py-4">
               <Lock className="w-8 h-8 text-gray-600 mx-auto mb-3" />
               <h1 className="text-lg font-semibold text-white mb-2">

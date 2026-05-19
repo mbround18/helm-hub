@@ -5,6 +5,9 @@ const FALLBACK: AppSettings = {
   app_name: "Helm Hub",
   logo_url: "",
   signup_enabled: true,
+  local_auth_enabled: true,
+  github_auth_enabled: false,
+  gitlab_auth_enabled: false,
 };
 
 export function useSettings() {

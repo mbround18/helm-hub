@@ -24,6 +24,8 @@ import {
 } from "../lib/api";
 import { ChartDetail } from "../components/ChartDetail";
 import { useAuthStore } from "../stores/auth";
+import { useSettings } from "../hooks/useSettings";
+import { Seo } from "../components/Seo";
 import clsx from "clsx";
 
 // ── Confirmation modal ────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ function ConfirmModal({
 
 export function Dashboard() {
   const { user } = useAuthStore();
+  const { app_name } = useSettings();
   const qc = useQueryClient();
   const [selectedChart, setSelectedChart] = useState<Chart | null>(null);
   const [viewChart, setViewChart] = useState<Chart | null>(null);
@@ -165,6 +168,12 @@ export function Dashboard() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
+      <Seo
+        title={`My Charts | ${app_name}`}
+        description="Manage your Helm chart releases and installation details."
+        canonical={`${window.location.origin}/u/${user?.username ?? ""}`}
+        robots="noindex,follow"
+      />
       {confirm && (
         <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />
       )}
@@ -193,6 +202,7 @@ export function Dashboard() {
               description={viewChart.description}
               keywords={viewChart.keywords}
               downloadCount={viewChart.download_count}
+              shareUrl={`${window.location.origin}/charts/${user!.username}/${viewChart.name}`}
             />
           </div>
         </div>

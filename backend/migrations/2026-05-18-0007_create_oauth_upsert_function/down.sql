@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS auth.upsert_oauth_user(TEXT, TEXT, TEXT, TEXT, TEXT);

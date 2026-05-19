@@ -59,6 +59,7 @@ export interface ChartDetailProps {
   description?: string | null;
   keywords?: string | null;
   downloadCount: number;
+  shareUrl?: string;
 }
 
 export function ChartDetail({
@@ -67,9 +68,11 @@ export function ChartDetail({
   description,
   keywords,
   downloadCount,
+  shareUrl,
 }: ChartDetailProps) {
   const [tab, setTab] = useState<DetailTab>("install");
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const { data: versions = [] as ChartVersion[], isLoading } = useQuery({
     queryKey: ["versions-detail", ownerUsername, name],
@@ -124,6 +127,23 @@ export function ChartDetail({
                   </span>
                 ))}
           </div>
+          {shareUrl && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(shareUrl);
+                setShareCopied(true);
+                setTimeout(() => setShareCopied(false), 2000);
+              }}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-300 hover:text-white hover:border-violet-700 transition-colors"
+            >
+              {shareCopied ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+              {shareCopied ? "Copied share link" : "Copy share link"}
+            </button>
+          )}
         </div>
       </div>
 

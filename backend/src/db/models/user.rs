@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::schema::users;
 
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Identifiable)]
+#[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize, Identifiable)]
 #[diesel(table_name = users)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct User {

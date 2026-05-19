@@ -1,13 +1,16 @@
 use axum::{Json, extract::State};
 use serde::Serialize;
 
-use crate::{AppState, error::AppError};
+use crate::{AppState, error::AppError, services::auth_providers};
 
 #[derive(Serialize)]
 pub struct AppSettingsResponse {
     pub app_name: String,
     pub logo_url: String,
     pub signup_enabled: bool,
+    pub local_auth_enabled: bool,
+    pub github_auth_enabled: bool,
+    pub gitlab_auth_enabled: bool,
 }
 
 /// `GET /api/settings` — public, no auth required.
@@ -26,9 +29,18 @@ pub async fn get_settings(
         .await
         .unwrap_or_default();
     let signup_enabled = crate::services::settings::signup_enabled(&mut conn).await;
+    let local_auth_enabled =
+        auth_providers::bool_setting(&mut conn, auth_providers::KEY_LOCAL_ENABLED, true).await;
+    let github_auth_enabled =
+        auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITHUB_ENABLED, false).await;
+    let gitlab_auth_enabled =
+        auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITLAB_ENABLED, false).await;
     Ok(Json(AppSettingsResponse {
         app_name,
         logo_url,
         signup_enabled,
+        local_auth_enabled,
+        github_auth_enabled,
+        gitlab_auth_enabled,
     }))
 }

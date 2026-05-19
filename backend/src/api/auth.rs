@@ -1,6 +1,7 @@
 use axum::{Json, extract::State};
 use chrono::{DateTime, Timelike, Utc};
 use diesel::prelude::*;
+use diesel::sql_query;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13,7 +14,7 @@ use crate::{
         password::{hash_password, verify_password},
         totp::{generate_secret, provisioning_uri, verify_code},
     },
-    db::models::{NewUser, UpdateUser, User},
+    db::models::{UpdateUser, User},
     error::AppError,
     schema::{rate_limit_windows, users},
     services::{audit::audit, settings},
@@ -208,22 +209,17 @@ pub async fn register(
     }
 
     let hash = hash_password(&req.password)?;
-    let new_user = NewUser::new(req.username, req.email, hash);
-
     let mut conn = state
         .db
         .get()
         .await
         .map_err(|e| AppError::Pool(e.to_string()))?;
-    diesel::insert_into(users::table)
-        .values(&new_user)
-        .execute(&mut conn)
-        .await?;
 
-    let user: User = users::table
-        .filter(users::id.eq(&new_user.id))
-        .select(User::as_select())
-        .first(&mut conn)
+    let user: User = sql_query("SELECT * FROM auth.register_user($1, $2, $3)")
+        .bind::<diesel::sql_types::Text, _>(&req.username)
+        .bind::<diesel::sql_types::Text, _>(&req.email)
+        .bind::<diesel::sql_types::Text, _>(&hash)
+        .get_result(&mut conn)
         .await?;
 
     audit(
@@ -260,6 +256,7 @@ pub async fn login(
 ) -> Result<Json<LoginResponse>, AppError> {
     // Check failed-login counter before touching the DB for the user record.
     check_failed_logins(&state, &req.username).await?;
+    let username = req.username.clone();
 
     let mut conn = state
         .db
@@ -269,10 +266,9 @@ pub async fn login(
 
     // Use a constant-time-friendly error: same message for "no such user" and
     // "wrong password" to prevent username enumeration.
-    let mut user: User = users::table
-        .filter(users::username.eq(&req.username))
-        .select(User::as_select())
-        .first(&mut conn)
+    let mut user: User = sql_query("SELECT * FROM auth.login_user($1)")
+        .bind::<diesel::sql_types::Text, _>(&username)
+        .get_result(&mut conn)
         .await
         .map_err(|_| {
             let state_clone = state.clone();

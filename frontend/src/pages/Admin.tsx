@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useReactTable,
@@ -26,10 +26,12 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Zap,
 } from "lucide-react";
 import { adminApi, settingsApi, type AdminUser } from "../lib/api";
 import { useAuthStore } from "../stores/auth";
 import { useSettings } from "../hooks/useSettings";
+import { Seo } from "../components/Seo";
 import { Navigate } from "react-router-dom";
 
 function fmtBytes(b: number) {
@@ -154,6 +156,238 @@ function SettingsPanel() {
         </div>
       </div>
     </section>
+  );
+}
+
+function AuthProvidersPanel() {
+  const qc = useQueryClient();
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const { data } = useQuery({
+    queryKey: ["admin-auth-providers"],
+    queryFn: () => adminApi.getAuthProviders().then((r) => r.data),
+  });
+  const [form, setForm] = useState({
+    local_enabled: true,
+    github_enabled: false,
+    github_client_id: "",
+    github_client_secret: "",
+    github_redirect_uri: "",
+    gitlab_enabled: false,
+    gitlab_base_url: "",
+    gitlab_client_id: "",
+    gitlab_client_secret: "",
+    gitlab_redirect_uri: "",
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    setForm({
+      local_enabled: data.local_enabled,
+      github_enabled: data.github.enabled,
+      github_client_id: data.github.client_id ?? "",
+      github_client_secret: "",
+      github_redirect_uri: data.github.redirect_uri ?? "",
+      gitlab_enabled: data.gitlab.enabled,
+      gitlab_base_url: data.gitlab.base_url ?? "",
+      gitlab_client_id: data.gitlab.client_id ?? "",
+      gitlab_client_secret: "",
+      gitlab_redirect_uri: data.gitlab.redirect_uri ?? "",
+    });
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (body: Parameters<typeof adminApi.updateAuthProviders>[0]) =>
+      adminApi.updateAuthProviders(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-auth-providers"] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    },
+    onError: (err: any) =>
+      setError(err?.response?.data?.error ?? "Failed to save"),
+  });
+
+  return (
+    <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5">
+      <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+        <Shield className="w-4 h-4 text-violet-400" /> Auth providers
+      </h2>
+
+      {error && (
+        <div className="flex items-center gap-2 text-red-400 bg-red-950/40 border border-red-800 rounded-lg px-3 py-2.5 text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
+      {saved && (
+        <div className="flex items-center gap-2 text-emerald-400 bg-emerald-950/40 border border-emerald-800 rounded-lg px-3 py-2.5 text-sm">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          Auth provider settings saved
+        </div>
+      )}
+
+      <div className="grid gap-6">
+        <ProviderCard
+          title="Local auth"
+          enabled={form.local_enabled}
+          onToggle={(enabled) => setForm((f) => ({ ...f, local_enabled: enabled }))}
+        />
+        <ProviderForm
+          title="GitHub"
+          enabled={form.github_enabled}
+          onToggle={(enabled) => setForm((f) => ({ ...f, github_enabled: enabled }))}
+          fields={[
+            ["Client ID", form.github_client_id, "github_client_id"],
+            ["Client Secret", form.github_client_secret, "github_client_secret", "password"],
+            ["Redirect URI", form.github_redirect_uri, "github_redirect_uri"],
+          ]}
+          onFieldChange={(key, value) =>
+            setForm((f) => ({ ...f, [key]: value }))
+          }
+        />
+        <ProviderForm
+          title="GitLab"
+          enabled={form.gitlab_enabled}
+          onToggle={(enabled) => setForm((f) => ({ ...f, gitlab_enabled: enabled }))}
+          fields={[
+            ["Base URL", form.gitlab_base_url, "gitlab_base_url"],
+            ["Client ID", form.gitlab_client_id, "gitlab_client_id"],
+            ["Client Secret", form.gitlab_client_secret, "gitlab_client_secret", "password"],
+            ["Redirect URI", form.gitlab_redirect_uri, "gitlab_redirect_uri"],
+          ]}
+          onFieldChange={(key, value) =>
+            setForm((f) => ({ ...f, [key]: value }))
+          }
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => {
+            setError("");
+            saveMutation.mutate({
+              ...form,
+              github_client_secret: form.github_client_secret || undefined,
+              gitlab_client_secret: form.gitlab_client_secret || undefined,
+            });
+          }}
+          disabled={saveMutation.isPending}
+          className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          {saveMutation.isPending ? "Saving…" : "Save provider settings"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ProviderCard({
+  title,
+  enabled,
+  onToggle,
+}: {
+  title: string;
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium text-white">{title}</p>
+        <p className="text-xs text-gray-500">
+          {enabled ? "Enabled" : "Disabled"}
+        </p>
+      </div>
+      <button
+        onClick={() => onToggle(!enabled)}
+        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+          enabled ? "bg-violet-600" : "bg-gray-700"
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+            enabled ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+function ProviderForm({
+  title,
+  enabled,
+  onToggle,
+  fields,
+  onFieldChange,
+}: {
+  title: string;
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+  fields: Array<[
+    label: string,
+    value: string,
+    key:
+      | "github_client_id"
+      | "github_client_secret"
+      | "github_redirect_uri"
+      | "gitlab_base_url"
+      | "gitlab_client_id"
+      | "gitlab_client_secret"
+      | "gitlab_redirect_uri",
+    type?: string,
+  ]>;
+  onFieldChange: (
+    key:
+      | "github_client_id"
+      | "github_client_secret"
+      | "github_redirect_uri"
+      | "gitlab_base_url"
+      | "gitlab_client_id"
+      | "gitlab_client_secret"
+      | "gitlab_redirect_uri",
+    value: string,
+  ) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-white">{title}</p>
+          <p className="text-xs text-gray-500">
+            {enabled ? "Enabled" : "Disabled"}
+          </p>
+        </div>
+        <button
+          onClick={() => onToggle(!enabled)}
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+            enabled ? "bg-violet-600" : "bg-gray-700"
+          }`}
+        >
+          <span
+            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+              enabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {fields.map(([label, value, key, type]) => (
+          <div key={key} className="space-y-2">
+            <label className="block text-xs font-medium text-gray-400">
+              {label}
+            </label>
+            <input
+              value={value}
+              type={type ?? "text"}
+              onChange={(e) => onFieldChange(key, e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-violet-600 transition-colors"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -491,10 +725,172 @@ function PaginationButton({
   );
 }
 
+// ── Observability Panel ────────────────────────────────────────────────────────
+
+function ObservabilityPanel() {
+  const qc = useQueryClient();
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [testingGrafana, setTestingGrafana] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["admin-observability"],
+    queryFn: () => adminApi.getObservability().then((r) => r.data),
+  });
+  const [form, setForm] = useState({
+    otel_endpoint: "",
+    grafana_url: "",
+    grafana_api_token: "",
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    setForm({
+      otel_endpoint: data.otel_endpoint ?? "",
+      grafana_url: data.grafana_url ?? "",
+      grafana_api_token: "",
+    });
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (body: Parameters<typeof adminApi.updateObservability>[0]) =>
+      adminApi.updateObservability(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-observability"] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    },
+    onError: (err: any) =>
+      setError(err?.response?.data?.error ?? "Failed to save"),
+  });
+
+  return (
+    <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5">
+      <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+        <Zap className="w-4 h-4 text-violet-400" /> Observability
+      </h2>
+
+      {error && (
+        <div className="flex items-center gap-2 text-red-400 bg-red-950/40 border border-red-800 rounded-lg px-3 py-2.5 text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
+      {saved && (
+        <div className="flex items-center gap-2 text-emerald-400 bg-emerald-950/40 border border-emerald-800 rounded-lg px-3 py-2.5 text-sm">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          Observability settings saved
+        </div>
+      )}
+
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-gray-400">
+            OpenTelemetry Endpoint (optional)
+          </label>
+          <p className="text-xs text-gray-500">
+            OTLP HTTP endpoint for telemetry collection (e.g., http://localhost:4318)
+          </p>
+          <input
+            value={form.otel_endpoint}
+            onChange={(e) => setForm((f) => ({ ...f, otel_endpoint: e.target.value }))}
+            placeholder="http://otel-collector:4318"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-gray-400">
+            Grafana URL (optional)
+          </label>
+          <p className="text-xs text-gray-500">
+            Grafana instance URL for dashboard integration (e.g., https://grafana.example.com)
+          </p>
+          <input
+            value={form.grafana_url}
+            onChange={(e) => setForm((f) => ({ ...f, grafana_url: e.target.value }))}
+            placeholder="https://grafana.example.com"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-gray-400">
+            Grafana API Token (optional)
+          </label>
+          <p className="text-xs text-gray-500">
+            API token for authenticating with Grafana
+          </p>
+          <input
+            type="password"
+            value={form.grafana_api_token}
+            onChange={(e) => setForm((f) => ({ ...f, grafana_api_token: e.target.value }))}
+            placeholder="••••••••••••••••"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+          />
+          {data?.grafana_configured && (
+            <p className="text-xs text-emerald-400">✓ Grafana is configured</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3">
+        {data?.grafana_configured && form.grafana_url && (
+          <button
+            onClick={async () => {
+              setTestingGrafana(true);
+              setError("");
+              try {
+                const response = await fetch(
+                  `${form.grafana_url}/api/health`,
+                  {
+                    headers: {
+                      Authorization: `Bearer ${form.grafana_api_token || "test"}`,
+                    },
+                  }
+                ).then((r) => r.json());
+                if (response.status === "ok") {
+                  setSaved(true);
+                  setTimeout(() => setSaved(false), 2500);
+                } else {
+                  setError("Grafana health check failed");
+                }
+              } catch (err) {
+                setError("Could not reach Grafana. Check URL and token.");
+              } finally {
+                setTestingGrafana(false);
+              }
+            }}
+            disabled={testingGrafana || saveMutation.isPending}
+            className="text-gray-400 hover:text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            {testingGrafana ? "Testing…" : "Test Grafana"}
+          </button>
+        )}
+        <button
+          onClick={() => {
+            setError("");
+            saveMutation.mutate({
+              otel_endpoint: form.otel_endpoint || undefined,
+              grafana_url: form.grafana_url || undefined,
+              grafana_api_token: form.grafana_api_token || undefined,
+            });
+          }}
+          disabled={saveMutation.isPending}
+          className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          {saveMutation.isPending ? "Saving…" : "Save observability settings"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function Admin() {
   const { user } = useAuthStore();
+  const { app_name } = useSettings();
+  const [tab, setTab] = useState<"general" | "auth" | "observability" | "users">("general");
 
   if (!user || user.is_admin === 0) {
     return <Navigate to="/" replace />;
@@ -502,9 +898,55 @@ export function Admin() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+      <Seo
+        title={`Admin | ${app_name}`}
+        description="Manage users, moderation, and global application settings."
+        canonical={`${window.location.origin}/admin`}
+        robots="noindex,follow"
+      />
       <h1 className="text-xl font-bold text-white">Admin panel</h1>
-      <SettingsPanel />
-      <UsersPanel currentUserId={user.id} />
+      <div className="flex gap-2">
+        <TabButton active={tab === "general"} onClick={() => setTab("general")}>
+          General
+        </TabButton>
+        <TabButton active={tab === "auth"} onClick={() => setTab("auth")}>
+          Auth providers
+        </TabButton>
+        <TabButton active={tab === "observability"} onClick={() => setTab("observability")}>
+          Observability
+        </TabButton>
+        <TabButton active={tab === "users"} onClick={() => setTab("users")}>
+          Users
+        </TabButton>
+      </div>
+
+      {tab === "general" && <SettingsPanel />}
+      {tab === "auth" && <AuthProvidersPanel />}
+      {tab === "observability" && <ObservabilityPanel />}
+      {tab === "users" && <UsersPanel currentUserId={user.id} />}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-2 rounded-lg text-sm border transition-colors ${
+        active
+          ? "bg-violet-950/60 text-violet-300 border-violet-800/50"
+          : "bg-gray-900 text-gray-400 border-gray-800 hover:text-white hover:bg-gray-800"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

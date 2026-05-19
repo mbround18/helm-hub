@@ -14,6 +14,7 @@ import { chartsApi, type PublicChart } from "../lib/api";
 import { ChartDetail, fmtDownloads } from "../components/ChartDetail";
 import { AppLogo } from "../components/AppLogo";
 import { useSettings } from "../hooks/useSettings";
+import { Seo } from "../components/Seo";
 import clsx from "clsx";
 
 // ── FlexSearch setup ──────────────────────────────────────────────────────────
@@ -241,6 +242,7 @@ export function Explore() {
           description={selected.description}
           keywords={selected.keywords}
           downloadCount={selected.download_count}
+          shareUrl={`${window.location.origin}/charts/${selected.owner_username}/${selected.name}`}
         />
       </div>
     );
@@ -249,6 +251,11 @@ export function Explore() {
   // ── Hero / search view ───────────────────────────────────────────────────────
   return (
     <div className="min-h-full">
+      <Seo
+        title={`${app_name} — Discover Helm charts`}
+        description="Discover, install, and share Helm charts."
+        canonical={`${window.location.origin}/`}
+      />
       {/* Hero */}
       <div
         className={clsx(

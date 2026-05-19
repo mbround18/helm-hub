@@ -115,10 +115,54 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
 
+    gitlab_connections (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        gitlab_id -> Text,
+        gitlab_username -> Text,
+        gitlab_access_token -> Text,
+        avatar_url -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    gitlab_repos (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        gitlab_connection_id -> Uuid,
+        repo_owner -> Text,
+        repo_name -> Text,
+        last_synced_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
     rate_limit_windows (key) {
         key -> Text,
         count -> Integer,
         window_start -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    oauth_accounts (id) {
+        id -> Uuid,
+        provider -> Text,
+        provider_account_id -> Text,
+        user_id -> Uuid,
+        email -> Nullable<Text>,
+        display_name -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -162,6 +206,10 @@ diesel::joinable!(downloads -> artifact_versions (artifact_version_id));
 diesel::joinable!(github_connections -> users (user_id));
 diesel::joinable!(github_repos -> github_connections (github_connection_id));
 diesel::joinable!(github_repos -> users (user_id));
+diesel::joinable!(gitlab_connections -> users (user_id));
+diesel::joinable!(gitlab_repos -> gitlab_connections (gitlab_connection_id));
+diesel::joinable!(gitlab_repos -> users (user_id));
+diesel::joinable!(oauth_accounts -> users (user_id));
 diesel::joinable!(repositories -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -173,6 +221,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     downloads,
     github_connections,
     github_repos,
+    gitlab_connections,
+    gitlab_repos,
+    oauth_accounts,
     rate_limit_windows,
     repositories,
     users,

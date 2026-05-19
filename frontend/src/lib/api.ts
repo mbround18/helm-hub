@@ -108,6 +108,21 @@ export const authApi = {
     api.post<{ secret: string; provisioning_uri: string }>("/auth/totp/setup"),
 
   totpEnable: (code: string) => api.post("/auth/totp/enable", { code }),
+
+  me: () => api.get<User>("/auth/me"),
+
+  providers: () =>
+    api.get<{
+      local_enabled: boolean;
+      github_enabled: boolean;
+      gitlab_enabled: boolean;
+    }>("/auth/providers"),
+
+  githubSsoLogin: (returnTo: string) =>
+    `/api/auth/sso/github/login?return_to=${encodeURIComponent(returnTo)}`,
+
+  gitlabSsoLogin: (returnTo: string) =>
+    `/api/auth/sso/gitlab/login?return_to=${encodeURIComponent(returnTo)}`,
 };
 
 // ── Charts ────────────────────────────────────────────────────────────────────
@@ -162,6 +177,26 @@ export interface GithubRepo {
   created_at: string;
 }
 
+export interface GitlabConnection {
+  id: string;
+  user_id: string;
+  gitlab_id: number;
+  gitlab_username: string;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitlabRepo {
+  id: string;
+  user_id: string;
+  gitlab_connection_id: string;
+  repo_owner: string;
+  repo_name: string;
+  last_synced_at: string | null;
+  created_at: string;
+}
+
 export interface ChartSyncEntry {
   chart: string;
   version: string;
@@ -196,6 +231,27 @@ export const githubApi = {
   syncRepo: (id: string) => api.post<SyncReport>(`/github/repos/${id}/sync`),
 };
 
+export const gitlabApi = {
+  /** Returns the GitLab OAuth authorization URL. Must be logged in. */
+  oauthUrl: (returnTo: string) =>
+    api.get<{ url: string }>(
+      `/auth/gitlab/url?return_to=${encodeURIComponent(returnTo)}`,
+    ),
+
+  getConnection: () =>
+    api.get<{ connection: GitlabConnection | null }>("/gitlab/connection"),
+
+  deleteConnection: () => api.delete("/gitlab/connection"),
+
+  listRepos: () => api.get<GitlabRepo[]>("/gitlab/repos"),
+
+  addRepo: (repo: string) => api.post<GitlabRepo>("/gitlab/repos", { repo }),
+
+  removeRepo: (id: string) => api.delete(`/gitlab/repos/${id}`),
+
+  syncRepo: (id: string) => api.post<SyncReport>(`/gitlab/repos/${id}/sync`),
+};
+
 // ── Personal Access Tokens ────────────────────────────────────────────────────
 
 export const tokensApi = {
@@ -213,6 +269,9 @@ export interface AppSettings {
   app_name: string;
   logo_url: string;
   signup_enabled: boolean;
+  local_auth_enabled: boolean;
+  github_auth_enabled: boolean;
+  gitlab_auth_enabled: boolean;
 }
 
 export const settingsApi = {
@@ -248,4 +307,49 @@ export const adminApi = {
     api.put(`/admin/users/${id}/quota`, { quota_bytes }),
   deleteChart: (owner: string, chartName: string) =>
     api.delete(`/admin/charts/${owner}/${chartName}`),
+  getAuthProviders: () =>
+    api.get<{
+      local_enabled: boolean;
+      github: {
+        enabled: boolean;
+        client_id: string | null;
+        client_secret_set: boolean;
+        redirect_uri: string | null;
+        base_url: string | null;
+      };
+      gitlab: {
+        enabled: boolean;
+        client_id: string | null;
+        client_secret_set: boolean;
+        redirect_uri: string | null;
+        base_url: string | null;
+      };
+    }>("/admin/auth/providers"),
+  updateAuthProviders: (
+    body: Partial<{
+      local_enabled: boolean;
+      github_enabled: boolean;
+      github_client_id: string;
+      github_client_secret: string | undefined;
+      github_redirect_uri: string;
+      gitlab_enabled: boolean;
+      gitlab_base_url: string;
+      gitlab_client_id: string;
+      gitlab_client_secret: string | undefined;
+      gitlab_redirect_uri: string;
+    }>,
+  ) => api.put("/admin/auth/providers", body),
+  getObservability: () =>
+    api.get<{
+      otel_endpoint: string | null;
+      grafana_url: string | null;
+      grafana_configured: boolean;
+    }>("/admin/observability"),
+  updateObservability: (
+    body: Partial<{
+      otel_endpoint: string;
+      grafana_url: string;
+      grafana_api_token: string;
+    }>,
+  ) => api.put("/admin/observability", body),
 };

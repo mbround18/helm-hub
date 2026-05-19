@@ -9,6 +9,7 @@ pub mod telemetry;
 
 use axum::{
     Router,
+    extract::OriginalUri,
     extract::DefaultBodyLimit,
     http::{HeaderValue, Method},
     middleware::{self, Next},
@@ -17,6 +18,7 @@ use axum::{
 };
 use config::Config;
 use metrics_exporter_prometheus::PrometheusHandle;
+use services::seo;
 use tower_http::{
     compression::CompressionLayer,
     cors::CorsLayer,
@@ -36,12 +38,95 @@ async fn not_found() -> impl IntoResponse {
     axum::http::StatusCode::NOT_FOUND
 }
 
+const SEO_TITLE: &str = "__SEO_TITLE__";
+const SEO_DESCRIPTION: &str = "__SEO_DESCRIPTION__";
+const SEO_CANONICAL: &str = "__SEO_CANONICAL__";
+const SEO_ROBOTS: &str = "__SEO_ROBOTS__";
+const SEO_OG_TYPE: &str = "__SEO_OG_TYPE__";
+const SEO_IMAGE: &str = "__SEO_IMAGE__";
+const SEO_TWITTER_CARD: &str = "__SEO_TWITTER_CARD__";
+
+struct SeoTags {
+    title: String,
+    description: String,
+    canonical: String,
+    robots: String,
+    og_type: String,
+    image: String,
+    twitter_card: String,
+}
+
+fn escape_html_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn apply_seo(template: &str, seo: &SeoTags) -> String {
+    template
+        .replace(SEO_TITLE, &escape_html_attr(&seo.title))
+        .replace(SEO_DESCRIPTION, &escape_html_attr(&seo.description))
+        .replace(SEO_CANONICAL, &escape_html_attr(&seo.canonical))
+        .replace(SEO_ROBOTS, &escape_html_attr(&seo.robots))
+        .replace(SEO_OG_TYPE, &escape_html_attr(&seo.og_type))
+        .replace(SEO_IMAGE, &escape_html_attr(&seo.image))
+        .replace(SEO_TWITTER_CARD, &escape_html_attr(&seo.twitter_card))
+}
+
+fn default_seo(path: &str, origin: &str) -> SeoTags {
+    let canonical = format!("{}{}", origin.trim_end_matches('/'), path);
+    SeoTags {
+        title: "Helm Hub".into(),
+        description: "Discover, install, and share Helm charts.".into(),
+        canonical,
+        robots: "index,follow".into(),
+        og_type: "website".into(),
+        image: "/icons.svg".into(),
+        twitter_card: "summary".into(),
+    }
+}
+
+async fn page_seo(state: &AppState, path: &str) -> SeoTags {
+    if let Some(rest) = path.strip_prefix("/charts/") {
+        let mut parts = rest.splitn(2, '/');
+        if let (Some(owner), Some(chart)) = (parts.next(), parts.next()) {
+            if let Ok(mut conn) = state.db.get().await {
+                if let Ok(chart_seo) = seo::chart_seo(&mut conn, owner, chart).await {
+                    return SeoTags {
+                        title: chart_seo.title,
+                        description: chart_seo.description,
+                        canonical: format!(
+                            "{}{}",
+                            state.config.frontend_origin.trim_end_matches('/'),
+                            chart_seo.canonical_path
+                        ),
+                        robots: "index,follow".into(),
+                        og_type: "article".into(),
+                        image: "/icons.svg".into(),
+                        twitter_card: "summary".into(),
+                    };
+                }
+            }
+        }
+    }
+
+    default_seo(path, &state.config.frontend_origin)
+}
+
 async fn spa_index(
     axum::extract::State(state): axum::extract::State<AppState>,
+    OriginalUri(uri): OriginalUri,
 ) -> impl IntoResponse {
-    let path = std::path::Path::new(&state.config.static_assets_path).join("index.html");
-    match tokio::fs::read_to_string(path).await {
-        Ok(html) => Html(html).into_response(),
+    let path = uri.path().to_string();
+    let index = std::path::Path::new(&state.config.static_assets_path).join("index.html");
+    match tokio::fs::read_to_string(index).await {
+        Ok(html) => {
+            let seo = page_seo(&state, &path).await;
+            Html(apply_seo(&html, &seo)).into_response()
+        }
         Err(err) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!(
@@ -88,12 +173,27 @@ pub fn app(state: AppState) -> Router {
 
     let public_routes = Router::new()
         .route("/api/settings", get(api::settings::get_settings))
+        .route("/api/auth/providers", get(api::auth_providers::get_public_settings))
         .route("/api/telemetry/faro", post(api::telemetry::faro_proxy))
         .route("/api/auth/register", post(api::auth::register))
         .route("/api/auth/login", post(api::auth::login))
         .route(
             "/api/auth/github/callback",
             get(api::github::oauth_callback),
+        )
+        .route(
+            "/api/auth/gitlab/callback",
+            get(api::gitlab::oauth_callback),
+        )
+        .route("/api/auth/sso/github/login", get(api::auth_providers::github_login))
+        .route(
+            "/api/auth/sso/github/callback",
+            get(api::auth_providers::github_callback),
+        )
+        .route("/api/auth/sso/gitlab/login", get(api::auth_providers::gitlab_login))
+        .route(
+            "/api/auth/sso/gitlab/callback",
+            get(api::auth_providers::gitlab_callback),
         )
         .route("/api/artifacts", get(api::artifacts::list_artifacts))
         .route(
@@ -137,6 +237,14 @@ pub fn app(state: AppState) -> Router {
             "/api/admin/settings",
             axum::routing::put(api::admin::update_settings),
         )
+        .route(
+            "/api/admin/auth/providers",
+            get(api::auth_providers::get_admin_settings).put(api::auth_providers::update_admin_settings),
+        )
+        .route(
+            "/api/admin/observability",
+            get(api::admin::get_observability_settings).put(api::admin::update_observability_settings),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::admin::require_admin,
@@ -170,6 +278,7 @@ pub fn app(state: AppState) -> Router {
             get(api::tokens::list_tokens).post(api::tokens::create_token),
         )
         .route("/api/tokens/{id}", delete(api::tokens::delete_token))
+        .route("/api/auth/me", get(api::auth_providers::me))
         .route("/api/auth/github/url", get(api::github::oauth_url))
         .route(
             "/api/github/connection",
@@ -181,6 +290,17 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/github/repos/{id}", delete(api::github::remove_repo))
         .route("/api/github/repos/{id}/sync", post(api::github::sync_repo))
+        .route("/api/auth/gitlab/url", get(api::gitlab::oauth_url))
+        .route(
+            "/api/gitlab/connection",
+            get(api::gitlab::get_connection).delete(api::gitlab::delete_connection),
+        )
+        .route(
+            "/api/gitlab/repos",
+            get(api::gitlab::list_repos).post(api::gitlab::add_repo),
+        )
+        .route("/api/gitlab/repos/{id}", delete(api::gitlab::remove_repo))
+        .route("/api/gitlab/repos/{id}/sync", post(api::gitlab::sync_repo))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::require_auth,
