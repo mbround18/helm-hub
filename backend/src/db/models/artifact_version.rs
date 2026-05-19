@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::schema::artifact_versions;
 
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Identifiable, QueryableByName)]
 #[diesel(table_name = artifact_versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ArtifactVersion {

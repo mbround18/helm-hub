@@ -82,10 +82,11 @@ async fn update_metrics(
     otel_users.record(user_count as f64, &[]);
 
     // 4. Total Storage Usage
-    let total_storage: Option<i64> = sql_query("SELECT SUM(storage_usage_bytes)::BIGINT as sum FROM users")
-        .get_result::<TotalStorage>(&mut conn)
-        .await?
-        .sum;
+    let total_storage: Option<i64> =
+        sql_query("SELECT SUM(storage_usage_bytes)::BIGINT as sum FROM users")
+            .get_result::<TotalStorage>(&mut conn)
+            .await?
+            .sum;
 
     let storage_val = total_storage.unwrap_or(0);
     metrics::gauge!(METRIC_STORAGE_BYTES_TOTAL).set(storage_val as f64);

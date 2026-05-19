@@ -1,8 +1,8 @@
 use axum::{
+    Extension, Json,
     extract::{Query, State},
     http::StatusCode,
     response::Redirect,
-    Extension, Json,
 };
 use chrono::Utc;
 use diesel::prelude::*;
@@ -31,11 +31,7 @@ struct OAuthState {
     exp: i64,
 }
 
-fn encode_oauth_state(
-    provider: &str,
-    return_to: &str,
-    secret: &str,
-) -> Result<String, AppError> {
+fn encode_oauth_state(provider: &str, return_to: &str, secret: &str) -> Result<String, AppError> {
     let claims = OAuthState {
         provider: provider.to_string(),
         return_to: return_to.to_string(),
@@ -99,7 +95,11 @@ pub struct UpdateAuthProvidersBody {
 pub async fn get_public_settings(
     State(state): State<AppState>,
 ) -> Result<Json<AuthProvidersResponse>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     Ok(Json(AuthProvidersResponse {
         local_enabled: auth_providers::bool_setting(
             &mut conn,
@@ -125,7 +125,11 @@ pub async fn get_public_settings(
 pub async fn get_admin_settings(
     State(state): State<AppState>,
 ) -> Result<Json<AdminAuthProvidersResponse>, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     Ok(Json(AdminAuthProvidersResponse {
         local_enabled: auth_providers::bool_setting(
             &mut conn,
@@ -206,7 +210,9 @@ pub async fn update_admin_settings(
     }
     if let Some(ref redirect_uri) = body.github_redirect_uri {
         let trimmed = redirect_uri.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("http://") && !trimmed.starts_with("https://")
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("http://")
+            && !trimmed.starts_with("https://")
         {
             return Err(AppError::BadRequest(
                 "github_redirect_uri must be an http/https URL".into(),
@@ -234,7 +240,9 @@ pub async fn update_admin_settings(
     }
     if let Some(ref base_url) = body.gitlab_base_url {
         let trimmed = base_url.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("http://") && !trimmed.starts_with("https://")
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("http://")
+            && !trimmed.starts_with("https://")
         {
             return Err(AppError::BadRequest(
                 "gitlab_base_url must be an http/https URL".into(),
@@ -257,7 +265,9 @@ pub async fn update_admin_settings(
     }
     if let Some(ref redirect_uri) = body.gitlab_redirect_uri {
         let trimmed = redirect_uri.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("http://") && !trimmed.starts_with("https://")
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("http://")
+            && !trimmed.starts_with("https://")
         {
             return Err(AppError::BadRequest(
                 "gitlab_redirect_uri must be an http/https URL".into(),
@@ -327,57 +337,64 @@ async fn oauth_login(
     provider: &str,
     return_to: Option<&str>,
 ) -> Result<Redirect, AppError> {
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     let return_to = safe_return_to(return_to);
     let state_token = encode_oauth_state(provider, return_to, &state.config.oauth_state_secret)?;
 
     match provider {
         "github" => {
-            let enabled = auth_providers::bool_setting(
-                &mut conn,
-                auth_providers::KEY_GITHUB_ENABLED,
-                false,
-            )
-            .await;
+            let enabled =
+                auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITHUB_ENABLED, false)
+                    .await;
             if !enabled {
                 return Err(AppError::Forbidden("GitHub sign-in is disabled".into()));
             }
-            let client_id = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_CLIENT_ID)
-                .await
-                .ok_or_else(|| AppError::Forbidden("GitHub sign-in is not configured".into()))?;
-            let redirect_uri = auth_providers::opt_setting(
-                &mut conn,
-                auth_providers::KEY_GITHUB_REDIRECT_URI,
-            )
-            .await
-            .ok_or_else(|| AppError::Forbidden("GitHub sign-in is not configured".into()))?;
+            let client_id =
+                auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_CLIENT_ID)
+                    .await
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitHub sign-in is not configured".into())
+                    })?;
+            let redirect_uri =
+                auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_REDIRECT_URI)
+                    .await
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitHub sign-in is not configured".into())
+                    })?;
             let url = format!(
                 "https://github.com/login/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&scope=read%3Auser%20user%3Aemail&state={state_token}"
             );
             Ok(Redirect::to(&url))
         }
         "gitlab" => {
-            let enabled = auth_providers::bool_setting(
-                &mut conn,
-                auth_providers::KEY_GITLAB_ENABLED,
-                false,
-            )
-            .await;
+            let enabled =
+                auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITLAB_ENABLED, false)
+                    .await;
             if !enabled {
                 return Err(AppError::Forbidden("GitLab sign-in is disabled".into()));
             }
-            let base_url = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL)
-                .await
-                .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
-            let client_id = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID)
-                .await
-                .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
-            let redirect_uri = auth_providers::opt_setting(
-                &mut conn,
-                auth_providers::KEY_GITLAB_REDIRECT_URI,
-            )
-            .await
-            .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
+            let base_url =
+                auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL)
+                    .await
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitLab sign-in is not configured".into())
+                    })?;
+            let client_id =
+                auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID)
+                    .await
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitLab sign-in is not configured".into())
+                    })?;
+            let redirect_uri =
+                auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_REDIRECT_URI)
+                    .await
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitLab sign-in is not configured".into())
+                    })?;
             let url = format!(
                 "{base_url}/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=read_user%20email&state={state_token}"
             );
@@ -408,11 +425,7 @@ pub async fn gitlab_callback(
     oauth_callback(&state, "gitlab", q).await
 }
 
-async fn oauth_callback(
-    state: &AppState,
-    provider: &str,
-    q: OAuthCallbackQuery,
-) -> Redirect {
+async fn oauth_callback(state: &AppState, provider: &str, q: OAuthCallbackQuery) -> Redirect {
     let redirect_err = || {
         Redirect::to(&format!(
             "{}auth/callback?error=oauth",
@@ -442,33 +455,35 @@ async fn oauth_callback(
         Err(_) => return redirect_err(),
     };
 
-    let (provider_account_id, email, display_name) = match provider_profile(state, provider, &code)
-        .await
-    {
-        Ok(v) => v,
-        Err(_) => return redirect_err(),
-    };
+    let (provider_account_id, email, display_name) =
+        match provider_profile(state, provider, &code).await {
+            Ok(v) => v,
+            Err(_) => return redirect_err(),
+        };
 
     let random_password_hash = match hash_password(&Uuid::new_v4().to_string()) {
         Ok(v) => v,
         Err(_) => return redirect_err(),
     };
 
-    let mut user: User = match diesel::sql_query("SELECT * FROM auth.upsert_oauth_user($1, $2, $3, $4, $5)")
-        .bind::<diesel::sql_types::Text, _>(provider)
-        .bind::<diesel::sql_types::Text, _>(&provider_account_id)
-        .bind::<diesel::sql_types::Text, _>(email.as_deref().unwrap_or(""))
-        .bind::<diesel::sql_types::Text, _>(display_name.as_deref().unwrap_or(""))
-        .bind::<diesel::sql_types::Text, _>(&random_password_hash)
-        .get_result(&mut conn)
-        .await
-    {
-        Ok(user) => user,
-        Err(_) => return redirect_err(),
-    };
+    let mut user: User =
+        match diesel::sql_query("SELECT * FROM auth.upsert_oauth_user($1, $2, $3, $4, $5)")
+            .bind::<diesel::sql_types::Text, _>(provider)
+            .bind::<diesel::sql_types::Text, _>(&provider_account_id)
+            .bind::<diesel::sql_types::Text, _>(email.as_deref().unwrap_or(""))
+            .bind::<diesel::sql_types::Text, _>(display_name.as_deref().unwrap_or(""))
+            .bind::<diesel::sql_types::Text, _>(&random_password_hash)
+            .get_result(&mut conn)
+            .await
+        {
+            Ok(user) => user,
+            Err(_) => return redirect_err(),
+        };
 
     // Assign Owner role if this user matches the bootstrap admin username
-    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+    if let Err(e) =
+        seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await
+    {
         tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during oauth login");
     }
 
@@ -535,7 +550,11 @@ async fn provider_profile(
 ) -> Result<(String, Option<String>, Option<String>), AppError> {
     match provider {
         "github" => {
-            let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+            let mut conn = state
+                .db
+                .get()
+                .await
+                .map_err(|e| AppError::Pool(e.to_string()))?;
             let client_id =
                 auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITHUB_CLIENT_ID)
                     .await
@@ -571,15 +590,23 @@ async fn provider_profile(
             ))
         }
         "gitlab" => {
-            let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+            let mut conn = state
+                .db
+                .get()
+                .await
+                .map_err(|e| AppError::Pool(e.to_string()))?;
             let base_url =
                 auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL)
                     .await
-                    .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitLab sign-in is not configured".into())
+                    })?;
             let client_id =
                 auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID)
                     .await
-                    .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitLab sign-in is not configured".into())
+                    })?;
             let client_secret = auth_providers::get_secret(
                 &mut conn,
                 auth_providers::KEY_GITLAB_CLIENT_SECRET,
@@ -587,12 +614,12 @@ async fn provider_profile(
             )
             .await?
             .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
-            let redirect_uri = auth_providers::opt_setting(
-                &mut conn,
-                auth_providers::KEY_GITLAB_REDIRECT_URI,
-            )
-            .await
-            .ok_or_else(|| AppError::Forbidden("GitLab sign-in is not configured".into()))?;
+            let redirect_uri =
+                auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_REDIRECT_URI)
+                    .await
+                    .ok_or_else(|| {
+                        AppError::Forbidden("GitLab sign-in is not configured".into())
+                    })?;
             let token = gitlab_exchange_code(
                 &state.http_client,
                 &base_url,
@@ -730,7 +757,11 @@ pub async fn me(
 ) -> Result<Json<User>, AppError> {
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-    let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
     set_current_user(&mut conn, &claims.sub, claims.is_admin)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to set RLS context: {e}")))?;
@@ -746,7 +777,9 @@ pub async fn me(
             _ => AppError::from(e),
         })?;
 
-    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+    if let Err(e) =
+        seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await
+    {
         tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during /auth/me");
     }
     Ok(Json(user))

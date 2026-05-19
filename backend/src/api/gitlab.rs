@@ -29,9 +29,7 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::jwt::Claims,
-    db::{
-        models::{GitlabConnection, GitlabRepo, NewGitlabConnection, NewGitlabRepo},
-    },
+    db::models::{GitlabConnection, GitlabRepo, NewGitlabConnection, NewGitlabRepo},
     error::AppError,
     schema::{gitlab_connections, gitlab_repos},
     services::{audit::audit, auth_providers, gitlab_sync, token_crypto},
@@ -166,26 +164,32 @@ pub async fn oauth_url(
     Query(q): Query<OAuthUrlQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     // Get GitLab credentials from admin-configured settings
-    let mut conn = state.db.get().await.map_err(|e| AppError::Internal(format!("DB connection error: {e}")))?;
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Internal(format!("DB connection error: {e}")))?;
 
-    let gitlab_enabled = auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITLAB_ENABLED, false).await;
+    let gitlab_enabled =
+        auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITLAB_ENABLED, false).await;
     if !gitlab_enabled {
         return Err(AppError::Internal(
             "GitLab OAuth is not configured on this server.".into(),
         ));
     }
 
-    let base_url = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL).await.ok_or_else(|| {
-        AppError::Internal("GitLab base URL not configured".into())
-    })?;
+    let base_url = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL)
+        .await
+        .ok_or_else(|| AppError::Internal("GitLab base URL not configured".into()))?;
 
-    let client_id = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID).await.ok_or_else(|| {
-        AppError::Internal("GitLab client ID not configured".into())
-    })?;
+    let client_id = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID)
+        .await
+        .ok_or_else(|| AppError::Internal("GitLab client ID not configured".into()))?;
 
-    let redirect_uri = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_REDIRECT_URI).await.ok_or_else(|| {
-        AppError::Internal("GitLab redirect URI not configured".into())
-    })?;
+    let redirect_uri =
+        auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_REDIRECT_URI)
+            .await
+            .ok_or_else(|| AppError::Internal("GitLab redirect URI not configured".into()))?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
@@ -252,30 +256,41 @@ pub async fn oauth_callback(
         }
     };
 
-    let gitlab_enabled = auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITLAB_ENABLED, false).await;
+    let gitlab_enabled =
+        auth_providers::bool_setting(&mut conn, auth_providers::KEY_GITLAB_ENABLED, false).await;
     if !gitlab_enabled {
         return redirect_err(return_to);
     }
 
-    let base_url = match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL).await {
-        Some(url) => url,
-        None => return redirect_err(return_to),
-    };
+    let base_url =
+        match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_BASE_URL).await {
+            Some(url) => url,
+            None => return redirect_err(return_to),
+        };
 
-    let client_id = match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID).await {
-        Some(id) => id,
-        None => return redirect_err(return_to),
-    };
+    let client_id =
+        match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_CLIENT_ID).await {
+            Some(id) => id,
+            None => return redirect_err(return_to),
+        };
 
-    let client_secret = match auth_providers::get_secret(&mut conn, auth_providers::KEY_GITLAB_CLIENT_SECRET, &state.config.token_encryption_key).await {
+    let client_secret = match auth_providers::get_secret(
+        &mut conn,
+        auth_providers::KEY_GITLAB_CLIENT_SECRET,
+        &state.config.token_encryption_key,
+    )
+    .await
+    {
         Ok(Some(secret)) => secret,
         _ => return redirect_err(return_to),
     };
 
-    let redirect_uri = match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_REDIRECT_URI).await {
-        Some(uri) => uri,
-        None => return redirect_err(return_to),
-    };
+    let redirect_uri =
+        match auth_providers::opt_setting(&mut conn, auth_providers::KEY_GITLAB_REDIRECT_URI).await
+        {
+            Some(uri) => uri,
+            None => return redirect_err(return_to),
+        };
 
     let access_token = match exchange_code(
         &state.http_client,
@@ -385,7 +400,10 @@ pub async fn get_connection(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Internal(format!("DB connection failed: {e}")))?;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id: {e}")))?;
@@ -409,20 +427,29 @@ pub async fn delete_connection(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Internal(format!("DB connection failed: {e}")))?;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id: {e}")))?;
 
-    diesel::delete(
-        gitlab_connections::table
-            .filter(gitlab_connections::user_id.eq(user_id))
-    )
-    .execute(&mut conn)
-    .await
-    .map_err(|e| AppError::Internal(format!("DB error: {e}")))?;
+    diesel::delete(gitlab_connections::table.filter(gitlab_connections::user_id.eq(user_id)))
+        .execute(&mut conn)
+        .await
+        .map_err(|e| AppError::Internal(format!("DB error: {e}")))?;
 
-    audit(&mut conn, Some(user_id), "gitlab_connection_deleted", "gitlab_connection", None, None).await.ok();
+    audit(
+        &mut conn,
+        Some(user_id),
+        "gitlab_connection_deleted",
+        "gitlab_connection",
+        None,
+        None,
+    )
+    .await
+    .ok();
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -433,7 +460,10 @@ pub async fn list_repos(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<Vec<GitlabRepo>>, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Internal(format!("DB connection failed: {e}")))?;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id: {e}")))?;
@@ -460,7 +490,10 @@ pub async fn add_repo(
     Extension(claims): Extension<Claims>,
     Json(req): Json<AddRepoRequest>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Internal(format!("DB connection failed: {e}")))?;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id: {e}")))?;
@@ -476,7 +509,9 @@ pub async fn add_repo(
 
     let parts: Vec<&str> = req.slug.split('/').collect();
     if parts.len() != 2 {
-        return Err(AppError::BadRequest("Invalid repository slug format".into()));
+        return Err(AppError::BadRequest(
+            "Invalid repository slug format".into(),
+        ));
     }
 
     let repo_owner = parts[0].to_string();
@@ -495,7 +530,16 @@ pub async fn add_repo(
         .await
         .map_err(|_| AppError::BadRequest("Repository already linked".into()))?;
 
-    audit(&mut conn, Some(user_id), "gitlab_repo_added", "gitlab_repo", None, Some(serde_json::json!({"repo": format!("{}/{}", repo_owner, repo_name)}))).await.ok();
+    audit(
+        &mut conn,
+        Some(user_id),
+        "gitlab_repo_added",
+        "gitlab_repo",
+        None,
+        Some(serde_json::json!({"repo": format!("{}/{}", repo_owner, repo_name)})),
+    )
+    .await
+    .ok();
 
     Ok(StatusCode::CREATED)
 }
@@ -507,7 +551,10 @@ pub async fn sync_repo(
     Extension(claims): Extension<Claims>,
     Path(repo_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Internal(format!("DB connection failed: {e}")))?;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id: {e}")))?;
@@ -559,7 +606,10 @@ pub async fn remove_repo(
     Extension(claims): Extension<Claims>,
     Path(repo_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Internal(format!("DB connection failed: {e}")))?;
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id: {e}")))?;
@@ -570,7 +620,7 @@ pub async fn remove_repo(
     diesel::delete(
         gitlab_repos::table
             .filter(gitlab_repos::id.eq(repo_uuid))
-            .filter(gitlab_repos::user_id.eq(user_id))
+            .filter(gitlab_repos::user_id.eq(user_id)),
     )
     .execute(&mut conn)
     .await

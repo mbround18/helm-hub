@@ -13,10 +13,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
-    AppState,
-    api::artifacts::scan_and_persist,
-    db::DbConn,
-    db::models::GitlabConnection,
+    AppState, api::artifacts::scan_and_persist, db::DbConn, db::models::GitlabConnection,
     error::AppError,
 };
 
@@ -69,14 +66,8 @@ pub async fn sync(
     )?;
 
     let user_id = connection.user_id;
-    
-    let releases = fetch_releases(
-        &state.http_client,
-        &access_token,
-        owner,
-        repo,
-    )
-    .await?;
+
+    let releases = fetch_releases(&state.http_client, &access_token, owner, repo).await?;
 
     let mut entries: Vec<ChartSyncEntry> = Vec::new();
 
@@ -89,7 +80,7 @@ pub async fn sync(
 
             // Extract the filename from the URL
             let filename = asset.url.split('/').next_back().unwrap_or("");
-            
+
             let Some((chart_name, version)) = parse_asset_name(filename) else {
                 tracing::debug!(asset = %filename, "Skipping unrecognised asset name");
                 continue;
@@ -145,9 +136,9 @@ pub fn parse_asset_name(filename: &str) -> Option<(String, String)> {
 }
 
 async fn version_exists(state: &AppState, user_id: Uuid, chart_name: &str, version: &str) -> bool {
+    use crate::schema::{artifact_versions, artifacts};
     use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
-    use crate::schema::{artifact_versions, artifacts};
 
     let Ok(mut conn) = state.db.get().await else {
         return false;
@@ -177,7 +168,7 @@ async fn fetch_releases(
     // Simple URL encoding: replace '/' with '%2F'
     let encoded_path = project_path.replace('/', "%2F");
     let url = format!("https://gitlab.com/api/v4/projects/{encoded_path}/releases?per_page=100");
-    
+
     let resp = client
         .get(&url)
         .header("PRIVATE-TOKEN", token)

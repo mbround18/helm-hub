@@ -110,7 +110,7 @@ pub struct UpdateRoleRequest {
 }
 
 /// Update a user's role with RBAC authorization checks.
-/// 
+///
 /// # Rules
 /// - Owner can promote to any role
 /// - Admin can promote to User or Admin (but not Owner)
@@ -127,12 +127,10 @@ pub async fn update_user_role(
     let _state = &state.0;
     let actor_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-    
+
     // Prevent self-modification
     if actor_id == target_user_id {
-        return Err(AppError::BadRequest(
-            "Cannot change your own role".into(),
-        ));
+        return Err(AppError::BadRequest("Cannot change your own role".into()));
     }
 
     // Parse the target role
@@ -151,13 +149,11 @@ pub async fn update_user_role(
 
     // Check if actor can promote to the target role
     if !can_promote_to(actor_role, target_role) {
-        return Err(AppError::Forbidden(
-            format!(
-                "Your role ({}) cannot promote to {}",
-                actor_role.as_str(),
-                target_role.as_str()
-            ),
-        ));
+        return Err(AppError::Forbidden(format!(
+            "Your role ({}) cannot promote to {}",
+            actor_role.as_str(),
+            target_role.as_str()
+        )));
     }
 
     // Get the target user
@@ -170,9 +166,7 @@ pub async fn update_user_role(
 
     // Prevent downgrading Owner role
     if target_user.role.is_owner() && !target_role.is_owner() {
-        return Err(AppError::Forbidden(
-            "Cannot downgrade an Owner role".into(),
-        ));
+        return Err(AppError::Forbidden("Cannot downgrade an Owner role".into()));
     }
 
     // Prevent promoting banned users
@@ -224,7 +218,6 @@ pub async fn update_user_role(
 
     Ok(Json(UserSummary::from(updated_user)))
 }
-
 
 // ── POST /api/admin/users/:id/ban ────────────────────────────────────────────
 
@@ -511,11 +504,11 @@ pub async fn get_observability_settings(
     let otel_endpoint = auth_providers::opt_setting(&mut conn, auth_providers::KEY_OTEL_ENDPOINT)
         .await
         .filter(|e| !e.is_empty());
-    
+
     let grafana_url = auth_providers::opt_setting(&mut conn, auth_providers::KEY_GRAFANA_URL)
         .await
         .filter(|u| !u.is_empty());
-    
+
     let grafana_configured = grafana_url.is_some()
         && auth_providers::opt_setting(&mut conn, auth_providers::KEY_GRAFANA_API_TOKEN)
             .await
@@ -572,8 +565,11 @@ pub async fn update_observability_settings(
                     url: trimmed.to_string(),
                     api_token: token.trim().to_string(),
                 };
-                crate::services::observability::validate_grafana(&state.0.http_client, &grafana_config)
-                    .await?;
+                crate::services::observability::validate_grafana(
+                    &state.0.http_client,
+                    &grafana_config,
+                )
+                .await?;
             }
         }
         settings::set(&mut conn, auth_providers::KEY_GRAFANA_URL, trimmed).await?;
@@ -583,10 +579,7 @@ pub async fn update_observability_settings(
         let trimmed = token.trim();
         if !trimmed.is_empty() {
             // Encrypt and store
-            let encrypted = crate::services::token_crypto::encrypt_token(
-                trimmed,
-                encryption_key,
-            )?;
+            let encrypted = crate::services::token_crypto::encrypt_token(trimmed, encryption_key)?;
             settings::set(&mut conn, auth_providers::KEY_GRAFANA_API_TOKEN, &encrypted).await?;
         } else {
             // Clear the token

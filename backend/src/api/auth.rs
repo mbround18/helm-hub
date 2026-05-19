@@ -10,11 +10,15 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::{
-        jwt::{Claims, encode_jwt, decode_jwt_without_expiry_check},
+        jwt::{Claims, decode_jwt_without_expiry_check, encode_jwt},
         password::{hash_password, verify_password},
         totp::{generate_secret, provisioning_uri, verify_code},
     },
-    db::{DbConn, models::{UpdateUser, User}, user_role::UserRole},
+    db::{
+        DbConn,
+        models::{UpdateUser, User},
+        user_role::UserRole,
+    },
     error::AppError,
     schema::{rate_limit_windows, users},
     services::{audit::audit, settings},
@@ -139,14 +143,14 @@ pub(crate) async fn seed_user_auth_state(
              updated_at = $5
          WHERE id = $6",
     )
-        .bind::<diesel::sql_types::Text, _>(target_role.as_str())
-        .bind::<diesel::sql_types::Bool, _>(target_is_admin)
-        .bind::<diesel::sql_types::Bool, _>(target_totp_enabled)
-        .bind::<diesel::sql_types::BigInt, _>(target_storage_usage)
-        .bind::<diesel::sql_types::Timestamptz, _>(Utc::now())
-        .bind::<diesel::sql_types::Uuid, _>(user.id)
-        .execute(conn)
-        .await?;
+    .bind::<diesel::sql_types::Text, _>(target_role.as_str())
+    .bind::<diesel::sql_types::Bool, _>(target_is_admin)
+    .bind::<diesel::sql_types::Bool, _>(target_totp_enabled)
+    .bind::<diesel::sql_types::BigInt, _>(target_storage_usage)
+    .bind::<diesel::sql_types::Timestamptz, _>(Utc::now())
+    .bind::<diesel::sql_types::Uuid, _>(user.id)
+    .execute(conn)
+    .await?;
 
     if updated == 0 {
         return Err(AppError::NotFound(
@@ -331,7 +335,9 @@ pub async fn register(
         .get_result(&mut conn)
         .await?;
 
-    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+    if let Err(e) =
+        seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await
+    {
         tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during register");
     }
 
@@ -441,7 +447,9 @@ pub async fn login(
         return Err(AppError::Forbidden("Account suspended".into()));
     }
 
-    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+    if let Err(e) =
+        seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await
+    {
         tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during login");
     }
 
@@ -472,13 +480,12 @@ pub async fn login(
     let token = encode_jwt(&claims, &state.config.jwt_secret)?;
 
     // Issue refresh token from stored procedure
-    let refresh_results = sql_query(
-        "SELECT token, expires_at FROM auth.issue_refresh_token($1, 168)"
-    )
-        .bind::<diesel::sql_types::Uuid, _>(user.id)
-        .load::<RefreshTokenStruct>(&mut conn)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to issue refresh token: {}", e)))?;
+    let refresh_results =
+        sql_query("SELECT token, expires_at FROM auth.issue_refresh_token($1, 168)")
+            .bind::<diesel::sql_types::Uuid, _>(user.id)
+            .load::<RefreshTokenStruct>(&mut conn)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to issue refresh token: {}", e)))?;
 
     let refresh_result = refresh_results
         .into_iter()
@@ -487,7 +494,7 @@ pub async fn login(
 
     let refresh_token_plaintext = refresh_result.token;
     let _refresh_expires_at = refresh_result.expires_at;
-    
+
     // Encrypt refresh token for secure localStorage storage
     use crate::auth::token_encryption::encrypt_token;
     let refresh_token_encrypted = encrypt_token(&refresh_token_plaintext, &user.id)?;
@@ -517,7 +524,7 @@ pub async fn login(
 
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
-    pub token: String,       // Old JWT (may be expired, but still decodable)
+    pub token: String,         // Old JWT (may be expired, but still decodable)
     pub refresh_token: String, // Encrypted refresh token
 }
 
@@ -535,8 +542,7 @@ pub async fn refresh(
     // Extract user_id from JWT claim before it expires
     // The user sends both the (possibly expired) JWT and refresh token
     let claims = decode_jwt_without_expiry_check(&req.token, &state.config.jwt_secret)?;
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let user_id = Uuid::parse_str(&claims.sub).map_err(|e| AppError::Internal(e.to_string()))?;
 
     let mut conn = state
         .db
@@ -574,8 +580,9 @@ pub async fn refresh(
     }
 
     // Get the new refresh token plaintext from stored procedure (will issue new one)
-    let new_refresh_token_plaintext = result.new_refresh_token
-        .ok_or_else(|| AppError::Internal("Stored procedure did not return new refresh token".into()))?;
+    let new_refresh_token_plaintext = result.new_refresh_token.ok_or_else(|| {
+        AppError::Internal("Stored procedure did not return new refresh token".into())
+    })?;
 
     // Encrypt the new refresh token
     use crate::auth::token_encryption::encrypt_token;

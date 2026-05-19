@@ -323,7 +323,7 @@ export function Dashboard() {
                 code={`curl -X POST \\
   -H "Authorization: Bearer $TOKEN" \\
   -F "chart=@my-chart-1.0.0.tgz" \\
-  ${hubBase}/api/charts/${user?.username}`}
+  ${hubBase}/api/artifacts/${user?.username}`}
               />
             </CliSection>
 
@@ -333,7 +333,7 @@ export function Dashboard() {
   -H "Authorization: Bearer $TOKEN" \\
   -F "chart=@chart-a-1.0.0.tgz" \\
   -F "chart=@chart-b-2.1.0.tgz" \\
-  ${hubBase}/api/charts/${user?.username}`}
+  ${hubBase}/api/artifacts/${user?.username}`}
               />
             </CliSection>
 
@@ -343,7 +343,7 @@ export function Dashboard() {
   curl -s -X POST \\
     -H "Authorization: Bearer $TOKEN" \\
     -F "chart=@$f" \\
-    ${hubBase}/api/charts/${user?.username} | jq .
+    ${hubBase}/api/artifacts/${user?.username} | jq .
 done`}
               />
             </CliSection>
@@ -351,7 +351,7 @@ done`}
             <CliSection title="4. Download a specific version">
               <CodeBlock
                 code={`curl -OJ \\
-  ${hubBase}/api/charts/${user?.username}/<chart>/<version>/download`}
+  ${hubBase}/api/artifacts/${user?.username}/<chart>/<version>/download`}
               />
             </CliSection>
           </div>
@@ -554,7 +554,7 @@ function VersionRow({
               app: {version.app_version}
             </span>
           )}
-          {version.deprecated !== 0 && (
+          {version.deprecated && (
             <span className="text-xs bg-yellow-900/50 text-yellow-400 border border-yellow-800 px-1.5 py-0.5 rounded">
               deprecated
             </span>

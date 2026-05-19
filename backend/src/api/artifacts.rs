@@ -7,6 +7,7 @@ use axum::{
 };
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::sql_query;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -38,6 +39,22 @@ const METRIC_UPLOADS_TOTAL: &str = "helm_hub_artifact_uploads_total";
 const METRIC_UPLOAD_ERRORS_TOTAL: &str = "helm_hub_artifact_upload_errors_total";
 const METRIC_SCANS_TOTAL: &str = "helm_hub_clamav_scans_total";
 const METRIC_DOWNLOADS_TOTAL: &str = "helm_hub_artifact_downloads_total";
+
+async fn resolve_owner_id(conn: &mut crate::db::DbConn, owner: &str) -> Result<Uuid, AppError> {
+    conn.transaction::<Uuid, AppError, _>(async |conn| {
+        sql_query("SELECT set_config('app.auth_context', 'true', true)")
+            .execute(conn)
+            .await?;
+
+        users::table
+            .filter(users::username.eq(owner))
+            .select(users::id)
+            .first(conn)
+            .await
+            .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))
+    })
+    .await
+}
 
 #[derive(Serialize)]
 pub(crate) struct UploadedArtifact {
@@ -229,7 +246,7 @@ pub(crate) async fn scan_and_persist(
     let extracted = extract_chart_metadata(bytes)
         .map_err(|e| AppError::BadRequest(format!("Invalid Helm chart archive: {e}")))?;
 
-    let (artifact_name, version, app_version, description) =
+    let (artifact_name, version, app_version, description, home_url, icon_url) =
         parse_chart_yaml(&extracted.chart_yaml).ok_or_else(|| {
             AppError::BadRequest("Chart.yaml missing required fields (name, version)".into())
         })?;
@@ -315,6 +332,8 @@ pub(crate) async fn scan_and_persist(
             let mut metadata = serde_json::json!({
                 "app_version": app_version,
                 "description": description,
+                "home_url": home_url,
+                "icon_url": icon_url,
             });
             if let Ok(chart_yaml) = serde_json::from_str::<serde_json::Value>(&extracted.chart_yaml)
             {
@@ -417,6 +436,212 @@ struct ArtifactWithUsername {
     owner_username: String,
 }
 
+#[derive(QueryableByName)]
+struct ArtifactOnlyRow {
+    #[diesel(embed)]
+    artifact: Artifact,
+}
+
+#[derive(Serialize)]
+pub struct ApiArtifactVersion {
+    pub id: Uuid,
+    pub artifact_id: Uuid,
+    pub version: String,
+    pub app_version: Option<String>,
+    pub description: Option<String>,
+    pub home_url: Option<String>,
+    pub icon_url: Option<String>,
+    pub digest: String,
+    pub storage_path: String,
+    pub chart_yaml: String,
+    pub values_yaml: Option<String>,
+    pub schema_json: Option<String>,
+    pub deprecated: bool,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+fn metadata_text(metadata: &serde_json::Value, key: &str) -> Option<String> {
+    let value = metadata.get(key)?;
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        other => yaml_serde::to_string(other)
+            .ok()
+            .or_else(|| Some(other.to_string())),
+    }
+}
+
+async fn to_api_artifact_version(
+    state: &AppState,
+    av: &ArtifactVersion,
+) -> Result<ApiArtifactVersion, AppError> {
+    let mut app_version = av
+        .metadata
+        .get("app_version")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut description = av
+        .metadata
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut home_url = av
+        .metadata
+        .get("home_url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut icon_url = av
+        .metadata
+        .get("icon_url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut chart_yaml = metadata_text(&av.metadata, "chart_yaml").unwrap_or_default();
+    let mut values_yaml = metadata_text(&av.metadata, "values_yaml");
+    let mut schema_json = metadata_text(&av.metadata, "schema_json");
+
+    // Backfill from archive when older records were stored without values/chart YAML in metadata.
+    if chart_yaml.is_empty() || values_yaml.is_none() {
+        let full_path = safe_join(
+            FsPath::new(&state.config.charts_storage_path),
+            &av.storage_path,
+        )?;
+        let bytes = tokio::fs::read(full_path).await?;
+        let bytes = Bytes::from(bytes);
+        if let Ok(extracted) = extract_chart_metadata(&bytes) {
+            if chart_yaml.is_empty() {
+                chart_yaml = extracted.chart_yaml;
+            }
+            if values_yaml.is_none() {
+                values_yaml = extracted.values_yaml;
+            }
+            if schema_json.is_none() {
+                schema_json = extracted.schema_json;
+            }
+            if app_version.is_none()
+                || description.is_none()
+                || home_url.is_none()
+                || icon_url.is_none()
+            {
+                if let Some((_, _, app, desc, home, icon)) = parse_chart_yaml(&chart_yaml) {
+                    if app_version.is_none() {
+                        app_version = app;
+                    }
+                    if description.is_none() {
+                        description = desc;
+                    }
+                    if home_url.is_none() {
+                        home_url = home;
+                    }
+                    if icon_url.is_none() {
+                        icon_url = icon;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(ApiArtifactVersion {
+        id: av.id,
+        artifact_id: av.artifact_id,
+        version: av.version.clone(),
+        app_version,
+        description,
+        home_url,
+        icon_url,
+        digest: hex::encode(&av.digest),
+        storage_path: av.storage_path.clone(),
+        chart_yaml,
+        values_yaml,
+        schema_json,
+        deprecated: av.deprecated,
+        created_at: av.created_at,
+    })
+}
+
+async fn get_public_artifact(
+    conn: &mut crate::db::DbConn,
+    owner: &str,
+    artifact_name: &str,
+) -> Result<Artifact, AppError> {
+    let row = diesel::sql_query("SELECT * FROM public.get_public_artifact($1, $2)")
+        .bind::<diesel::sql_types::Text, _>(owner)
+        .bind::<diesel::sql_types::Text, _>(artifact_name)
+        .get_result::<ArtifactOnlyRow>(conn)
+        .await;
+
+    match row {
+        Ok(r) => Ok(r.artifact),
+        Err(diesel::result::Error::NotFound) => {
+            // Fallback path to avoid false 404s when function-level joins are impacted by RLS context.
+            let owner_id = resolve_owner_id(conn, owner).await?;
+            artifacts::table
+                .filter(artifacts::owner_id.eq(owner_id))
+                .filter(artifacts::name.eq(artifact_name))
+                .filter(artifacts::is_private.eq(false))
+                .select(Artifact::as_select())
+                .first(conn)
+                .await
+                .map_err(|_| AppError::NotFound(format!("Artifact '{artifact_name}' not found")))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn list_public_artifact_versions(
+    conn: &mut crate::db::DbConn,
+    owner: &str,
+    artifact_name: &str,
+) -> Result<Vec<ArtifactVersion>, AppError> {
+    let versions = diesel::sql_query("SELECT * FROM public.list_public_artifact_versions($1, $2)")
+        .bind::<diesel::sql_types::Text, _>(owner)
+        .bind::<diesel::sql_types::Text, _>(artifact_name)
+        .load::<ArtifactVersion>(conn)
+        .await;
+
+    match versions {
+        Ok(v) if !v.is_empty() => Ok(v),
+        Ok(_) | Err(diesel::result::Error::NotFound) => {
+            let artifact = get_public_artifact(conn, owner, artifact_name).await?;
+            let v = artifact_versions::table
+                .filter(artifact_versions::artifact_id.eq(&artifact.id))
+                .select(ArtifactVersion::as_select())
+                .order(artifact_versions::created_at.desc())
+                .load(conn)
+                .await?;
+            Ok(v)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn get_public_artifact_version(
+    conn: &mut crate::db::DbConn,
+    owner: &str,
+    artifact_name: &str,
+    version: &str,
+) -> Result<ArtifactVersion, AppError> {
+    let row = diesel::sql_query("SELECT * FROM public.get_public_artifact_version($1, $2, $3)")
+        .bind::<diesel::sql_types::Text, _>(owner)
+        .bind::<diesel::sql_types::Text, _>(artifact_name)
+        .bind::<diesel::sql_types::Text, _>(version)
+        .get_result::<ArtifactVersion>(conn)
+        .await;
+
+    match row {
+        Ok(v) => Ok(v),
+        Err(diesel::result::Error::NotFound) => {
+            let artifact = get_public_artifact(conn, owner, artifact_name).await?;
+            artifact_versions::table
+                .filter(artifact_versions::artifact_id.eq(&artifact.id))
+                .filter(artifact_versions::version.eq(version))
+                .select(ArtifactVersion::as_select())
+                .first(conn)
+                .await
+                .map_err(|_| AppError::NotFound(format!("Version '{version}' not found")))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// `GET /api/artifacts` — public artifact index with optional search
 pub async fn list_artifacts(
     state: State<AppState>,
@@ -426,19 +651,8 @@ pub async fn list_artifacts(
     let _state = &state.0;
     let per_page = params.per_page.unwrap_or(20).min(100);
     let offset = (params.page.unwrap_or(1) - 1) * per_page;
-
-    let results: Vec<PublicArtifact> = if let Some(q) = params.q.as_deref() {
-        diesel::sql_query(
-            "
-            SELECT a.*, u.username
-            FROM artifacts a
-            JOIN users u ON a.owner_id = u.id
-            WHERE a.is_private = false AND (a.name % $1 OR a.description % $1)
-            ORDER BY similarity(a.name, $1) DESC
-            LIMIT $2 OFFSET $3
-        ",
-        )
-        .bind::<diesel::sql_types::Text, _>(q)
+    let results = diesel::sql_query("SELECT * FROM public.list_public_artifacts($1, $2, $3)")
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(params.q.as_deref())
         .bind::<diesel::sql_types::BigInt, _>(per_page)
         .bind::<diesel::sql_types::BigInt, _>(offset)
         .load::<ArtifactWithUsername>(&mut conn)
@@ -448,24 +662,7 @@ pub async fn list_artifacts(
             artifact: r.artifact,
             owner_username: r.owner_username,
         })
-        .collect()
-    } else {
-        artifacts::table
-            .inner_join(users::table.on(users::id.eq(artifacts::owner_id)))
-            .filter(artifacts::is_private.eq(false))
-            .select((Artifact::as_select(), users::username))
-            .order(artifacts::download_count.desc())
-            .limit(per_page)
-            .offset(offset)
-            .load::<(Artifact, String)>(&mut conn)
-            .await?
-            .into_iter()
-            .map(|(artifact, owner_username)| PublicArtifact {
-                artifact,
-                owner_username,
-            })
-            .collect()
-    };
+        .collect();
 
     Ok(Json(results))
 }
@@ -477,12 +674,7 @@ pub async fn list_user_artifacts(
     Path(owner): Path<String>,
 ) -> Result<Json<Vec<Artifact>>, AppError> {
     let _state = &state.0;
-    let user_id: Uuid = users::table
-        .filter(users::username.eq(&owner))
-        .select(users::id)
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+    let user_id = resolve_owner_id(&mut conn, &owner).await?;
 
     let results = artifacts::table
         .filter(artifacts::owner_id.eq(user_id))
@@ -501,32 +693,31 @@ pub async fn list_artifact_versions(
     state: State<AppState>,
     RlsConn(mut conn): RlsConn,
     Path((owner, artifact_name)): Path<(String, String)>,
-) -> Result<Json<Vec<ArtifactVersion>>, AppError> {
-    let _state = &state.0;
+) -> Result<Json<Vec<ApiArtifactVersion>>, AppError> {
+    let state = &state.0;
+    let _artifact = get_public_artifact(&mut conn, &owner, &artifact_name).await?;
+    let versions = list_public_artifact_versions(&mut conn, &owner, &artifact_name).await?;
+    let mut api_versions = Vec::with_capacity(versions.len());
+    for v in &versions {
+        api_versions.push(to_api_artifact_version(state, v).await?);
+    }
 
-    let user_id: Uuid = users::table
-        .filter(users::username.eq(&owner))
-        .select(users::id)
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+    Ok(Json(api_versions))
+}
 
-    let artifact: Artifact = artifacts::table
-        .filter(artifacts::owner_id.eq(user_id))
-        .filter(artifacts::name.eq(&artifact_name))
-        .select(Artifact::as_select())
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("Artifact '{artifact_name}' not found")))?;
-
-    let versions = artifact_versions::table
-        .filter(artifact_versions::artifact_id.eq(&artifact.id))
-        .select(ArtifactVersion::as_select())
-        .order(artifact_versions::created_at.desc())
-        .load(&mut conn)
-        .await?;
-
-    Ok(Json(versions))
+/// `GET /api/artifacts/:owner/:artifact_name/:version` — details for one public version.
+pub async fn get_artifact_version(
+    state: State<AppState>,
+    RlsConn(mut conn): RlsConn,
+    Path((owner, artifact_name, version)): Path<(String, String, String)>,
+) -> Result<Json<ApiArtifactVersion>, AppError> {
+    let state = &state.0;
+    let _artifact = get_public_artifact(&mut conn, &owner, &artifact_name).await?;
+    let artifact_version =
+        get_public_artifact_version(&mut conn, &owner, &artifact_name, &version).await?;
+    Ok(Json(
+        to_api_artifact_version(state, &artifact_version).await?,
+    ))
 }
 
 // ── Download ──────────────────────────────────────────────────────────────────
@@ -538,29 +729,8 @@ pub async fn download_artifact(
     Path((owner, artifact_name, version)): Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let state = &state.0;
-
-    let user_id: Uuid = users::table
-        .filter(users::username.eq(&owner))
-        .select(users::id)
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
-
-    let artifact: Artifact = artifacts::table
-        .filter(artifacts::owner_id.eq(user_id))
-        .filter(artifacts::name.eq(&artifact_name))
-        .select(Artifact::as_select())
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("Artifact '{artifact_name}' not found")))?;
-
-    let av: ArtifactVersion = artifact_versions::table
-        .filter(artifact_versions::artifact_id.eq(&artifact.id))
-        .filter(artifact_versions::version.eq(&version))
-        .select(ArtifactVersion::as_select())
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("Version '{version}' not found")))?;
+    let artifact = get_public_artifact(&mut conn, &owner, &artifact_name).await?;
+    let av = get_public_artifact_version(&mut conn, &owner, &artifact_name, &version).await?;
 
     let full_path = safe_join(
         FsPath::new(&state.config.charts_storage_path),
@@ -613,12 +783,7 @@ pub async fn delete_artifact_version(
     let actor_role = claims.user_role()?;
 
     // Resolve owner username to user_id
-    let owner_id: Uuid = users::table
-        .filter(users::username.eq(&owner))
-        .select(users::id)
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+    let owner_id = resolve_owner_id(&mut conn, &owner).await?;
 
     // Check authorization using RBAC helpers
     if !can_delete_chart(actor_role, owner_id, actor_id) {
@@ -707,12 +872,7 @@ pub async fn purge_artifact(
     let actor_role = claims.user_role()?;
 
     // Resolve owner username to user_id
-    let owner_id: Uuid = users::table
-        .filter(users::username.eq(&owner))
-        .select(users::id)
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+    let owner_id = resolve_owner_id(&mut conn, &owner).await?;
 
     // Check authorization using RBAC helpers
     if !can_delete_chart(actor_role, owner_id, actor_id) {
@@ -819,12 +979,7 @@ pub async fn artifact_repo_index(
 ) -> Result<impl IntoResponse, AppError> {
     let _state = &state.0;
 
-    let user_id: Uuid = users::table
-        .filter(users::username.eq(&owner))
-        .select(users::id)
-        .first(&mut conn)
-        .await
-        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+    let user_id = resolve_owner_id(&mut conn, &owner).await?;
 
     let owner_artifacts: Vec<Artifact> = artifacts::table
         .filter(artifacts::owner_id.eq(&user_id))

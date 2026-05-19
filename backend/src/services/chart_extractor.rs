@@ -158,14 +158,28 @@ pub fn extract_chart_metadata(bytes: &[u8]) -> io::Result<ExtractedChart> {
     })
 }
 
-/// Parses the `name` and `version` fields from raw `Chart.yaml` content.
-pub fn parse_chart_yaml(content: &str) -> Option<(String, String, Option<String>, Option<String>)> {
+/// Parses key fields from raw `Chart.yaml` content.
+pub fn parse_chart_yaml(
+    content: &str,
+) -> Option<(
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+)> {
     let doc: yaml_serde::Value = yaml_serde::from_str(content).ok()?;
     let name = doc["name"].as_str()?.to_string();
     let version = doc["version"].as_str()?.to_string();
     let app_version = doc["appVersion"].as_str().map(String::from);
     let description = doc["description"].as_str().map(String::from);
-    Some((name, version, app_version, description))
+    let home_url = doc["home"]
+        .as_str()
+        .or_else(|| doc["url"].as_str())
+        .map(String::from);
+    let icon_url = doc["icon"].as_str().map(String::from);
+    Some((name, version, app_version, description, home_url, icon_url))
 }
 
 /// Writes the chart `.tgz` to `{storage_root}/{owner}/{chart_name}/{version}.tgz`.

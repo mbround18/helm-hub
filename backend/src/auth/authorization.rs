@@ -7,7 +7,7 @@ use axum::{
 use crate::{AppState, auth::jwt::Claims, db::user_role::UserRole, error::AppError};
 
 /// Extracts the user role from JWT Claims.
-/// 
+///
 /// Returns the parsed UserRole if successful, or an error if the role is invalid
 /// or missing from the claims.
 pub fn get_user_role_from_request(claims: &Claims) -> Result<UserRole, AppError> {
@@ -15,9 +15,9 @@ pub fn get_user_role_from_request(claims: &Claims) -> Result<UserRole, AppError>
 }
 
 /// Middleware that requires Admin role or higher.
-/// 
+///
 /// Returns 403 Forbidden if the user's role is less than Admin.
-/// 
+///
 /// # Usage
 /// ```ignore
 /// .layer(middleware::from_fn_with_state(
@@ -41,17 +41,15 @@ pub async fn require_admin_or_owner(
     if user_role.is_admin_or_higher() {
         Ok(next.run(req).await)
     } else {
-        Err(AppError::Forbidden(
-            format!(
-                "Admin access required. Your role: {}",
-                user_role.as_str()
-            )
-        ))
+        Err(AppError::Forbidden(format!(
+            "Admin access required. Your role: {}",
+            user_role.as_str()
+        )))
     }
 }
 
 /// Middleware that requires Owner role.
-/// 
+///
 /// Returns 403 Forbidden if the user is not an Owner.
 pub async fn require_owner(
     State(_state): State<AppState>,
@@ -69,9 +67,7 @@ pub async fn require_owner(
     if user_role.is_owner() {
         Ok(next.run(req).await)
     } else {
-        Err(AppError::Forbidden(
-            "Owner access required".into()
-        ))
+        Err(AppError::Forbidden("Owner access required".into()))
     }
 }
 

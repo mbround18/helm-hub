@@ -39,16 +39,16 @@ struct GithubAsset {
 
 // ── Public result type ────────────────────────────────────────────────────────
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct ChartSyncEntry {
     pub chart: String,
     pub version: String,
-    pub status: &'static str, // "imported" | "skipped" | "failed"
+    pub status: String, // "imported" | "skipped" | "failed"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SyncReport {
     pub repo: String,
     pub entries: Vec<ChartSyncEntry>,
@@ -101,7 +101,7 @@ pub async fn sync_repo(
                 entries.push(ChartSyncEntry {
                     chart: chart_name,
                     version,
-                    status: "skipped",
+                    status: "skipped".to_string(),
                     message: Some("already imported".into()),
                 });
                 continue;
@@ -223,7 +223,7 @@ async fn download_and_import(
     let make_failed = |msg: String| ChartSyncEntry {
         chart: chart_name.to_string(),
         version: version.to_string(),
-        status: "failed",
+        status: "failed".to_string(),
         message: Some(msg),
     };
 
@@ -275,7 +275,7 @@ async fn download_and_import(
         Ok(uploaded) => ChartSyncEntry {
             chart: uploaded.artifact,
             version: uploaded.version,
-            status: "imported",
+            status: "imported".to_string(),
             message: None,
         },
         Err(e) => make_failed(e.to_string()),

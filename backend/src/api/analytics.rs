@@ -11,7 +11,7 @@ use crate::{
     auth::jwt::Claims,
     db::user_role::UserRole,
     error::AppError,
-    schema::{artifacts, artifact_versions, users},
+    schema::{artifact_versions, artifacts, users},
 };
 use axum::{
     Extension, Json,
@@ -77,7 +77,7 @@ struct DownloadSum {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// GET /api/analytics/instance
-/// 
+///
 /// Requires: Admin role or higher
 /// Returns aggregated statistics for the entire instance.
 pub async fn get_instance_analytics(
@@ -92,42 +92,36 @@ pub async fn get_instance_analytics(
         ));
     }
 
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Pool(e.to_string()))?;
 
-    let total_users: i64 = users::table
-        .count()
-        .get_result(&mut conn)
-        .await?;
+    let total_users: i64 = users::table.count().get_result(&mut conn).await?;
 
-    let total_storage_bytes: i64 = diesel::sql_query(
-        "SELECT COALESCE(SUM(storage_usage_bytes), 0) as sum FROM users"
-    )
-    .get_result::<StorageSum>(&mut conn)
-    .await?
-    .sum
-    .unwrap_or(0);
+    let total_storage_bytes: i64 =
+        diesel::sql_query("SELECT COALESCE(SUM(storage_usage_bytes), 0) as sum FROM users")
+            .get_result::<StorageSum>(&mut conn)
+            .await?
+            .sum
+            .unwrap_or(0);
 
-    let total_storage_limit_bytes: i64 = diesel::sql_query(
-        "SELECT COALESCE(SUM(storage_quota_bytes), 0) as sum FROM users"
-    )
-    .get_result::<StorageSum>(&mut conn)
-    .await?
-    .sum
-    .unwrap_or(0);
+    let total_storage_limit_bytes: i64 =
+        diesel::sql_query("SELECT COALESCE(SUM(storage_quota_bytes), 0) as sum FROM users")
+            .get_result::<StorageSum>(&mut conn)
+            .await?
+            .sum
+            .unwrap_or(0);
 
-    let total_downloads: i64 = diesel::sql_query(
-        "SELECT COALESCE(SUM(download_count), 0) as sum FROM artifacts"
-    )
-    .get_result::<DownloadSum>(&mut conn)
-    .await?
-    .sum
-    .unwrap_or(0);
+    let total_downloads: i64 =
+        diesel::sql_query("SELECT COALESCE(SUM(download_count), 0) as sum FROM artifacts")
+            .get_result::<DownloadSum>(&mut conn)
+            .await?
+            .sum
+            .unwrap_or(0);
 
-    let total_artifacts: i64 = artifacts::table
-        .count()
-        .get_result(&mut conn)
-        .await?;
+    let total_artifacts: i64 = artifacts::table.count().get_result(&mut conn).await?;
 
     let total_artifact_versions: i64 = artifact_versions::table
         .count()
@@ -146,7 +140,7 @@ pub async fn get_instance_analytics(
 }
 
 /// GET /api/analytics/package/:owner/:chart
-/// 
+///
 /// Returns analytics for a specific package/artifact.
 /// Requires: Authentication + authorization check
 ///   - Owner/Admin: can view any artifact's analytics
@@ -156,7 +150,10 @@ pub async fn get_package_analytics(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<PackageAnalytics>, AppError> {
-    let mut conn = state.db.get().await
+    let mut conn = state
+        .db
+        .get()
+        .await
         .map_err(|e| AppError::Pool(e.to_string()))?;
 
     let user_role = claims.user_role()?;
@@ -174,9 +171,7 @@ pub async fn get_package_analytics(
         .filter(artifacts::name.eq(&chart))
         .first(&mut conn)
         .await
-        .map_err(|_| AppError::NotFound(
-            format!("Artifact '{}/{}' not found", owner, chart)
-        ))?;
+        .map_err(|_| AppError::NotFound(format!("Artifact '{}/{}' not found", owner, chart)))?;
 
     match user_role {
         UserRole::Owner | UserRole::Admin => {

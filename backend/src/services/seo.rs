@@ -2,7 +2,7 @@ use diesel::prelude::*;
 use diesel::sql_query;
 use diesel_async::RunQueryDsl;
 
-use crate::{error::AppError, db::DbConn};
+use crate::{db::DbConn, error::AppError};
 
 #[derive(Debug, QueryableByName)]
 pub struct ChartSeo {
@@ -16,11 +16,7 @@ pub struct ChartSeo {
     pub canonical_path: String,
 }
 
-pub async fn chart_seo(
-    conn: &mut DbConn,
-    owner: &str,
-    chart: &str,
-) -> Result<ChartSeo, AppError> {
+pub async fn chart_seo(conn: &mut DbConn, owner: &str, chart: &str) -> Result<ChartSeo, AppError> {
     sql_query("SELECT * FROM seo.chart_seo($1, $2)")
         .bind::<diesel::sql_types::Text, _>(owner)
         .bind::<diesel::sql_types::Text, _>(chart)

@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::AppError, db::user_role::UserRole};
+use crate::{db::user_role::UserRole, error::AppError};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -16,7 +16,13 @@ pub struct Claims {
 }
 
 impl Claims {
-    pub fn new(user_id: &str, username: &str, is_admin: bool, role: UserRole, expiry_hours: i64) -> Self {
+    pub fn new(
+        user_id: &str,
+        username: &str,
+        is_admin: bool,
+        role: UserRole,
+        expiry_hours: i64,
+    ) -> Self {
         let now = Utc::now();
         Self {
             sub: user_id.to_string(),
@@ -28,7 +34,13 @@ impl Claims {
         }
     }
 
-    pub fn new_with_minutes(user_id: &str, username: &str, is_admin: bool, role: UserRole, expiry_minutes: i64) -> Self {
+    pub fn new_with_minutes(
+        user_id: &str,
+        username: &str,
+        is_admin: bool,
+        role: UserRole,
+        expiry_minutes: i64,
+    ) -> Self {
         let now = Utc::now();
         Self {
             sub: user_id.to_string(),

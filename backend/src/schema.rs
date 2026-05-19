@@ -108,6 +108,11 @@ diesel::table! {
         repo_owner -> Text,
         repo_name -> Text,
         last_synced_at -> Nullable<Timestamptz>,
+        sync_status -> Text,
+        sync_started_at -> Nullable<Timestamptz>,
+        sync_finished_at -> Nullable<Timestamptz>,
+        sync_error -> Nullable<Text>,
+        last_sync_report -> Nullable<Jsonb>,
         created_at -> Timestamptz,
     }
 }

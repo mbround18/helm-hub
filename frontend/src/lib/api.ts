@@ -66,29 +66,31 @@ export interface Chart {
   home_url: string | null;
   icon_url: string | null;
   keywords: string | null;
-  is_private: number;
+  is_private: boolean;
   created_at: string;
   updated_at: string;
   download_count: number;
 }
 
-/** Returned by GET /api/charts — includes owner_username for install URLs. */
+/** Returned by GET /api/artifacts — includes owner_username for install URLs. */
 export interface PublicChart extends Chart {
   owner_username: string;
 }
 
 export interface ChartVersion {
   id: string;
-  chart_id: string;
+  artifact_id: string;
   version: string;
   app_version: string | null;
   description: string | null;
+  home_url: string | null;
+  icon_url: string | null;
   digest: string;
   storage_path: string;
   chart_yaml: string;
   values_yaml: string | null;
   schema_json: string | null;
-  deprecated: number;
+  deprecated: boolean;
   created_at: string;
 }
 
@@ -130,30 +132,30 @@ export const authApi = {
 
 export const chartsApi = {
   list: (params?: { q?: string; page?: number; per_page?: number }) =>
-    api.get<PublicChart[]>("/charts", { params }),
+    api.get<PublicChart[]>("/artifacts", { params }),
 
-  listByOwner: (owner: string) => api.get<Chart[]>(`/charts/${owner}`),
+  listByOwner: (owner: string) => api.get<Chart[]>(`/artifacts/${owner}`),
 
   listVersions: (owner: string, chartName: string) =>
-    api.get<ChartVersion[]>(`/charts/${owner}/${chartName}`),
+    api.get<ChartVersion[]>(`/artifacts/${owner}/${chartName}`),
 
   upload: (owner: string, files: File | File[]) => {
     const form = new FormData();
     const list = Array.isArray(files) ? files : [files];
     for (const f of list) form.append("chart", f);
-    return api.post<UploadResult>(`/charts/${owner}`, form, {
+    return api.post<UploadResult>(`/artifacts/${owner}`, form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
 
   deleteVersion: (owner: string, chartName: string, version: string) =>
-    api.delete(`/charts/${owner}/${chartName}/${version}`),
+    api.delete(`/artifacts/${owner}/${chartName}/${version}`),
 
   purgeChart: (owner: string, chartName: string) =>
-    api.delete(`/charts/${owner}/${chartName}`),
+    api.delete(`/artifacts/${owner}/${chartName}`),
 
   downloadUrl: (owner: string, chartName: string, version: string) =>
-    `/api/charts/${owner}/${chartName}/${version}/download`,
+    `/api/artifacts/${owner}/${chartName}/${version}/download`,
 };
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
@@ -187,6 +189,11 @@ export interface GithubRepo {
   repo_owner: string;
   repo_name: string;
   last_synced_at: string | null;
+  sync_status: "idle" | "in_progress" | "completed" | "failed";
+  sync_started_at: string | null;
+  sync_finished_at: string | null;
+  sync_error: string | null;
+  last_sync_report: SyncReport | null;
   created_at: string;
 }
 
@@ -223,6 +230,14 @@ export interface SyncReport {
   synced_at: string;
 }
 
+export interface RepoSyncStatus {
+  status: "idle" | "in_progress" | "completed" | "failed";
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  report: SyncReport | null;
+}
+
 export const githubApi = {
   /** Returns the GitHub OAuth authorization URL. Must be logged in. */
   oauthUrl: (returnTo: string) =>
@@ -241,7 +256,8 @@ export const githubApi = {
 
   removeRepo: (id: string) => api.delete(`/github/repos/${id}`),
 
-  syncRepo: (id: string) => api.post<SyncReport>(`/github/repos/${id}/sync`),
+  syncRepo: (id: string) => api.post<RepoSyncStatus>(`/github/repos/${id}/sync`),
+  getSyncStatus: (id: string) => api.get<RepoSyncStatus>(`/github/repos/${id}/sync`),
 };
 
 export const gitlabApi = {

@@ -1,8 +1,8 @@
-use uuid::Uuid;
 use crate::db::user_role::UserRole;
+use uuid::Uuid;
 
 /// Checks if an actor can promote another user to a target role.
-/// 
+///
 /// Rules:
 /// - Owner can promote to any role
 /// - Admin can promote User to Admin (but not to Owner)
@@ -19,7 +19,7 @@ pub fn can_promote_to(actor_role: UserRole, target_role: UserRole) -> bool {
 }
 
 /// Checks if an actor can delete a user.
-/// 
+///
 /// Rules:
 /// - Owner can delete any user
 /// - Admin can delete non-Owner users
@@ -29,7 +29,7 @@ pub fn can_delete_user(actor_role: UserRole) -> bool {
 }
 
 /// Checks if an actor can delete a specific chart.
-/// 
+///
 /// Rules:
 /// - Owner can delete any chart
 /// - Admin can delete any chart
@@ -42,7 +42,7 @@ pub fn can_delete_chart(actor_role: UserRole, chart_owner_id: Uuid, actor_id: Uu
 }
 
 /// Checks if an actor can view analytics.
-/// 
+///
 /// Rules:
 /// - Owner can view all analytics
 /// - Admin can view instance-wide analytics (analytics_owner_id = None)
@@ -60,13 +60,15 @@ pub fn can_view_analytics(
         }
         UserRole::User => {
             // User can only view their own analytics
-            analytics_owner_id.map(|owner_id| owner_id == actor_id).unwrap_or(false)
+            analytics_owner_id
+                .map(|owner_id| owner_id == actor_id)
+                .unwrap_or(false)
         }
     }
 }
 
 /// Checks if a role has admin-level permissions or higher.
-/// 
+///
 /// This is a convenience function wrapping UserRole::is_admin_or_higher.
 pub fn is_admin_or_higher(role: UserRole) -> bool {
     role.is_admin_or_higher()
@@ -152,7 +154,11 @@ mod tests {
         let actor_id = Uuid::new_v4();
         let owner_id = Uuid::new_v4();
         assert!(can_view_analytics(UserRole::Owner, None, actor_id));
-        assert!(can_view_analytics(UserRole::Owner, Some(owner_id), actor_id));
+        assert!(can_view_analytics(
+            UserRole::Owner,
+            Some(owner_id),
+            actor_id
+        ));
     }
 
     #[test]
@@ -165,7 +171,11 @@ mod tests {
     fn test_admin_cannot_view_user_analytics() {
         let actor_id = Uuid::new_v4();
         let owner_id = Uuid::new_v4();
-        assert!(!can_view_analytics(UserRole::Admin, Some(owner_id), actor_id));
+        assert!(!can_view_analytics(
+            UserRole::Admin,
+            Some(owner_id),
+            actor_id
+        ));
     }
 
     #[test]
@@ -178,7 +188,11 @@ mod tests {
     fn test_user_cannot_view_others_analytics() {
         let actor_id = Uuid::new_v4();
         let owner_id = Uuid::new_v4();
-        assert!(!can_view_analytics(UserRole::User, Some(owner_id), actor_id));
+        assert!(!can_view_analytics(
+            UserRole::User,
+            Some(owner_id),
+            actor_id
+        ));
     }
 
     #[test]

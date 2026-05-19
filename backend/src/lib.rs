@@ -10,8 +10,8 @@ pub mod utils;
 
 use axum::{
     Router,
-    extract::OriginalUri,
     extract::DefaultBodyLimit,
+    extract::OriginalUri,
     http::{HeaderValue, Method},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -172,7 +172,10 @@ pub fn app(state: AppState) -> Router {
 
     let public_routes = Router::new()
         .route("/api/settings", get(api::settings::get_settings))
-        .route("/api/auth/providers", get(api::auth_providers::get_public_settings))
+        .route(
+            "/api/auth/providers",
+            get(api::auth_providers::get_public_settings),
+        )
         .route("/api/telemetry/faro", post(api::telemetry::faro_proxy))
         .route("/api/auth/register", post(api::auth::register))
         .route("/api/auth/login", post(api::auth::login))
@@ -185,12 +188,18 @@ pub fn app(state: AppState) -> Router {
             "/api/auth/gitlab/callback",
             get(api::gitlab::oauth_callback),
         )
-        .route("/api/auth/sso/github/login", get(api::auth_providers::github_login))
+        .route(
+            "/api/auth/sso/github/login",
+            get(api::auth_providers::github_login),
+        )
         .route(
             "/api/auth/sso/github/callback",
             get(api::auth_providers::github_callback),
         )
-        .route("/api/auth/sso/gitlab/login", get(api::auth_providers::gitlab_login))
+        .route(
+            "/api/auth/sso/gitlab/login",
+            get(api::auth_providers::gitlab_login),
+        )
         .route(
             "/api/auth/sso/gitlab/callback",
             get(api::auth_providers::gitlab_callback),
@@ -209,7 +218,33 @@ pub fn app(state: AppState) -> Router {
             get(api::artifacts::list_artifact_versions),
         )
         .route(
+            "/api/artifacts/{owner}/{chart_name}/{version}",
+            get(api::artifacts::get_artifact_version),
+        )
+        .route(
             "/api/artifacts/{owner}/{chart_name}/{version}/download",
+            get(api::artifacts::download_artifact),
+        )
+        // Backward-compatible aliases for older clients that still call /api/charts.
+        .route("/api/charts", get(api::artifacts::list_artifacts))
+        .route(
+            "/api/charts/{owner}",
+            get(api::artifacts::list_user_artifacts),
+        )
+        .route(
+            "/api/charts/{owner}/index.yaml",
+            get(api::artifacts::artifact_repo_index),
+        )
+        .route(
+            "/api/charts/{owner}/{chart_name}",
+            get(api::artifacts::list_artifact_versions),
+        )
+        .route(
+            "/api/charts/{owner}/{chart_name}/{version}",
+            get(api::artifacts::get_artifact_version),
+        )
+        .route(
+            "/api/charts/{owner}/{chart_name}/{version}/download",
             get(api::artifacts::download_artifact),
         )
         .layer(middleware::from_fn_with_state(
@@ -243,11 +278,13 @@ pub fn app(state: AppState) -> Router {
         )
         .route(
             "/api/admin/auth/providers",
-            get(api::auth_providers::get_admin_settings).put(api::auth_providers::update_admin_settings),
+            get(api::auth_providers::get_admin_settings)
+                .put(api::auth_providers::update_admin_settings),
         )
         .route(
             "/api/admin/observability",
-            get(api::admin::get_observability_settings).put(api::admin::update_observability_settings),
+            get(api::admin::get_observability_settings)
+                .put(api::admin::update_observability_settings),
         )
         .route(
             "/api/analytics/instance",
@@ -281,6 +318,16 @@ pub fn app(state: AppState) -> Router {
             "/api/artifacts/{owner}/{chart_name}/{version}",
             delete(api::artifacts::delete_artifact_version),
         )
+        // Backward-compatible aliases for older clients that still call /api/charts.
+        .route("/api/charts/{owner}", post(api::artifacts::upload_artifact))
+        .route(
+            "/api/charts/{owner}/{chart_name}",
+            delete(api::artifacts::purge_artifact),
+        )
+        .route(
+            "/api/charts/{owner}/{chart_name}/{version}",
+            delete(api::artifacts::delete_artifact_version),
+        )
         .route(
             "/api/tokens",
             get(api::tokens::list_tokens).post(api::tokens::create_token),
@@ -297,7 +344,10 @@ pub fn app(state: AppState) -> Router {
             get(api::github::list_repos).post(api::github::add_repo),
         )
         .route("/api/github/repos/{id}", delete(api::github::remove_repo))
-        .route("/api/github/repos/{id}/sync", post(api::github::sync_repo))
+        .route(
+            "/api/github/repos/{id}/sync",
+            get(api::github::get_sync_status).post(api::github::sync_repo),
+        )
         .route("/api/auth/gitlab/url", get(api::gitlab::oauth_url))
         .route(
             "/api/gitlab/connection",

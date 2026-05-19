@@ -1,23 +1,30 @@
 use diesel::{
+    backend::Backend,
     deserialize::FromSql,
+    deserialize::{self, Queryable},
+    expression::AsExpression,
     pg::Pg,
     serialize::ToSql,
     sql_types::Text,
-    expression::AsExpression,
-    backend::Backend,
-    deserialize::{self, Queryable},
 };
 use std::io::Write;
 
 /// User role in the RBAC system.
-/// 
+///
 /// Hierarchy: Owner > Admin > User
 /// - Owner: Bootstrap admin, highest privilege, cannot be removed
 /// - Admin: Can manage app settings, users (except Owners)
 /// - User: Default role for regular users
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
-    serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
     AsExpression,
 )]
 #[diesel(sql_type = Text)]
@@ -60,7 +67,10 @@ impl UserRole {
 
 // Diesel SQL type support
 impl ToSql<Text, Pg> for UserRole {
-    fn to_sql<'b>(&'b self, out: &mut diesel::serialize::Output<'b, '_, Pg>) -> diesel::serialize::Result {
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut diesel::serialize::Output<'b, '_, Pg>,
+    ) -> diesel::serialize::Result {
         out.write_all(self.as_str().as_bytes())?;
         Ok(diesel::serialize::IsNull::No)
     }

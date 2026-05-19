@@ -369,15 +369,43 @@ function SyncResults({
 function RepoRow({ repo }: { repo: GithubRepo }) {
   const qc = useQueryClient();
   const [syncResult, setSyncResult] = useState<ChartSyncEntry[] | null>(null);
+  const [isPolling, setIsPolling] = useState(repo.sync_status === "in_progress");
+
+  const { data: syncStatus } = useQuery({
+    queryKey: ["github-sync-status", repo.id],
+    queryFn: () => githubApi.getSyncStatus(repo.id).then((r) => r.data),
+    enabled: isPolling,
+    refetchInterval: (q) =>
+      q.state.data?.status === "in_progress" ? 2000 : false,
+  });
 
   const sync = useMutation({
     mutationFn: () => githubApi.syncRepo(repo.id),
     onSuccess: (res) => {
-      setSyncResult(res.data.entries);
+      setIsPolling(true);
+      if (res.data.status !== "in_progress") {
+        setIsPolling(false);
+        if (res.data.report) {
+          setSyncResult(res.data.report.entries);
+          qc.invalidateQueries({ queryKey: ["charts"] });
+        }
+      }
       qc.invalidateQueries({ queryKey: ["github-repos"] });
-      qc.invalidateQueries({ queryKey: ["charts"] });
     },
   });
+
+  useEffect(() => {
+    if (!syncStatus) return;
+    if (syncStatus.status === "in_progress") return;
+
+    setIsPolling(false);
+    qc.invalidateQueries({ queryKey: ["github-repos"] });
+
+    if (syncStatus.report) {
+      setSyncResult(syncStatus.report.entries);
+      qc.invalidateQueries({ queryKey: ["charts"] });
+    }
+  }, [syncStatus, qc]);
 
   const remove = useMutation({
     mutationFn: () => githubApi.removeRepo(repo.id),
@@ -410,16 +438,18 @@ function RepoRow({ repo }: { repo: GithubRepo }) {
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => sync.mutate()}
-            disabled={sync.isPending}
+            disabled={sync.isPending || syncStatus?.status === "in_progress"}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg transition-colors disabled:opacity-50"
             title="Sync releases from GitHub"
           >
-            {sync.isPending ? (
+            {sync.isPending || syncStatus?.status === "in_progress" ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <RefreshCw className="w-3.5 h-3.5" />
             )}
-            {sync.isPending ? "Syncing…" : "Sync now"}
+            {sync.isPending || syncStatus?.status === "in_progress"
+              ? "Syncing…"
+              : "Sync now"}
           </button>
           <button
             onClick={() => remove.mutate()}
@@ -436,6 +466,9 @@ function RepoRow({ repo }: { repo: GithubRepo }) {
         <p className="text-xs text-red-400">
           {(sync.error as any)?.response?.data?.error ?? "Sync failed"}
         </p>
+      )}
+      {syncStatus?.status === "failed" && syncStatus.error && (
+        <p className="text-xs text-red-400">Sync failed: {syncStatus.error}</p>
       )}
       {syncResult && <SyncResults entries={syncResult} repo={fullName} />}
     </div>

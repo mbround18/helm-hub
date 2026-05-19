@@ -168,7 +168,10 @@ impl Config {
         tracing::info!("Mgmt: {}:{}", self.host, self.mgmt_port);
         tracing::info!(
             "Database: {}",
-            self.database_url.split('@').next_back().unwrap_or("unknown")
+            self.database_url
+                .split('@')
+                .next_back()
+                .unwrap_or("unknown")
         );
         tracing::info!("Charts Storage: {}", self.charts_storage_path);
         tracing::info!("Static Assets: {}", self.static_assets_path);
@@ -241,7 +244,8 @@ impl Config {
         }
 
         // ── 4. GitHub validation if enabled ──────────────────────────────────
-        if self.github_enabled() && !self
+        if self.github_enabled()
+            && !self
                 .github_redirect_uri
                 .as_ref()
                 .unwrap()

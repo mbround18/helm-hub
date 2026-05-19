@@ -1,8 +1,8 @@
+use crate::error::AppError;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use sodiumoxide::crypto::secretbox;
 use uuid::Uuid;
-use crate::error::AppError;
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 
 /// Token encryption/decryption for secure localStorage storage
 /// Uses XSalsa20-Poly1305 AEAD from libsodium
@@ -14,7 +14,8 @@ pub fn encrypt_token(token: &str, user_id: &Uuid) -> Result<String, AppError> {
     // For now: hash(user_id) serves as deterministic key - immutable per user
     let key_material = format!("helm-hub-auth-{}", user_id);
     let hash = blake3::hash(key_material.as_bytes());
-    let key_bytes: [u8; 32] = hash.as_bytes()[..32].try_into()
+    let key_bytes: [u8; 32] = hash.as_bytes()[..32]
+        .try_into()
         .map_err(|_| AppError::Internal("Key derivation failed".into()))?;
 
     let key = secretbox::Key(key_bytes);
@@ -27,20 +28,20 @@ pub fn encrypt_token(token: &str, user_id: &Uuid) -> Result<String, AppError> {
     let mut combined = nonce.as_ref().to_vec();
     combined.extend_from_slice(&ciphertext);
 
-    Ok(format!(
-        "encrypted:{}",
-        STANDARD.encode(&combined)
-    ))
+    Ok(format!("encrypted:{}", STANDARD.encode(&combined)))
 }
 
 /// Decrypt a token using the same user ID-derived key
 pub fn decrypt_token(encrypted: &str, user_id: &Uuid) -> Result<String, AppError> {
     if !encrypted.starts_with("encrypted:") {
-        return Err(AppError::Unauthorized("Invalid encrypted token format".into()));
+        return Err(AppError::Unauthorized(
+            "Invalid encrypted token format".into(),
+        ));
     }
 
     let encoded = &encrypted[10..]; // Remove "encrypted:" prefix
-    let combined = STANDARD.decode(encoded)
+    let combined = STANDARD
+        .decode(encoded)
         .map_err(|_| AppError::Unauthorized("Invalid token encoding".into()))?;
 
     if combined.len() < secretbox::NONCEBYTES {
@@ -55,7 +56,8 @@ pub fn decrypt_token(encrypted: &str, user_id: &Uuid) -> Result<String, AppError
     // Derive key (same as encryption)
     let key_material = format!("helm-hub-auth-{}", user_id);
     let hash = blake3::hash(key_material.as_bytes());
-    let key_bytes: [u8; 32] = hash.as_bytes()[..32].try_into()
+    let key_bytes: [u8; 32] = hash.as_bytes()[..32]
+        .try_into()
         .map_err(|_| AppError::Internal("Key derivation failed".into()))?;
 
     let key = secretbox::Key(key_bytes);
@@ -95,4 +97,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

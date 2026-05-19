@@ -12,6 +12,7 @@ import {
   FileText,
   Loader2,
   TrendingUp,
+  Globe,
 } from "lucide-react";
 import { chartsApi, type ChartVersion } from "../lib/api";
 import clsx from "clsx";
@@ -90,14 +91,25 @@ export function ChartDetail({
     versions.find((v) => v.version === selectedVersion) ?? versions[0];
   const base = window.location.origin;
   const repoAlias = `hh-${ownerUsername}`;
-  const repoUrl = `${base}/api/charts/${ownerUsername}`;
+  const repoUrl = `${base}/api/artifacts/${ownerUsername}`;
+  const activeIcon = active?.icon_url ?? null;
+  const activeHome = active?.home_url ?? null;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
       {/* Chart header */}
       <div className="flex items-start gap-4">
-        <div className="w-14 h-14 rounded-xl bg-violet-950/60 border border-violet-800/40 flex items-center justify-center shrink-0">
-          <Package className="w-7 h-7 text-violet-400" />
+        <div className="w-14 h-14 rounded-xl bg-violet-950/60 border border-violet-800/40 flex items-center justify-center shrink-0 overflow-hidden">
+          {activeIcon ? (
+            <img
+              src={activeIcon}
+              alt={`${name} icon`}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <Package className="w-7 h-7 text-violet-400" />
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="text-2xl font-bold text-white">{name}</h2>
@@ -127,6 +139,17 @@ export function ChartDetail({
                   </span>
                 ))}
           </div>
+          {activeHome && (
+            <a
+              href={activeHome}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+            >
+              <Globe className="w-3 h-3" />
+              Project URL
+            </a>
+          )}
           {shareUrl && (
             <button
               onClick={() => {
@@ -171,7 +194,7 @@ export function ChartDetail({
               app: {active.app_version}
             </span>
           )}
-          {active?.deprecated !== 0 && (
+          {active?.deprecated && (
             <span className="text-xs bg-yellow-900/50 text-yellow-400 border border-yellow-800 px-1.5 py-0.5 rounded">
               deprecated
             </span>
@@ -253,7 +276,7 @@ export function ChartDetail({
               Direct download
             </p>
             <CodeBlock
-              code={`curl -LO "${base}/api/charts/${ownerUsername}/${name}/${active.version}/download"`}
+              code={`curl -LO "${base}/api/artifacts/${ownerUsername}/${name}/${active.version}/download"`}
             />
           </div>
         </div>

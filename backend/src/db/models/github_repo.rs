@@ -15,6 +15,11 @@ pub struct GithubRepo {
     pub repo_owner: String,
     pub repo_name: String,
     pub last_synced_at: Option<DateTime<Utc>>,
+    pub sync_status: String,
+    pub sync_started_at: Option<DateTime<Utc>>,
+    pub sync_finished_at: Option<DateTime<Utc>>,
+    pub sync_error: Option<String>,
+    pub last_sync_report: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -51,4 +56,9 @@ impl NewGithubRepo {
 #[diesel(table_name = github_repos)]
 pub struct UpdateGithubRepo {
     pub last_synced_at: Option<Option<DateTime<Utc>>>,
+    pub sync_status: Option<String>,
+    pub sync_started_at: Option<Option<DateTime<Utc>>>,
+    pub sync_finished_at: Option<Option<DateTime<Utc>>>,
+    pub sync_error: Option<Option<String>>,
+    pub last_sync_report: Option<Option<serde_json::Value>>,
 }

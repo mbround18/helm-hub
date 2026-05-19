@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{schema::users, db::user_role::UserRole};
+use crate::{db::user_role::UserRole, schema::users};
 
 #[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize, Identifiable)]
 #[diesel(table_name = users)]
