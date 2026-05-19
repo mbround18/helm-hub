@@ -51,6 +51,7 @@ export interface User {
   id: string;
   username: string;
   email: string;
+  role?: "Owner" | "Admin" | "User";
   totp_enabled: number;
   is_admin: number;
   created_at: string;
@@ -153,6 +154,18 @@ export const chartsApi = {
 
   downloadUrl: (owner: string, chartName: string, version: string) =>
     `/api/charts/${owner}/${chartName}/${version}/download`,
+};
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+export const analyticsApi = {
+  getInstanceAnalytics: () =>
+    api.get<InstanceAnalytics>("/analytics/instance").then((r) => r.data),
+
+  getPackageAnalytics: (owner: string, chart: string) =>
+    api
+      .get<PackageAnalytics>(`/analytics/package/${owner}/${chart}`)
+      .then((r) => r.data),
 };
 
 // ── GitHub ────────────────────────────────────────────────────────────────────
@@ -287,10 +300,31 @@ export const settingsApi = {
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
+export interface InstanceAnalytics {
+  total_users: number;
+  total_storage_bytes: number;
+  total_storage_limit_bytes: number;
+  total_downloads: number;
+  total_charts: number;
+  total_chart_versions: number;
+  last_updated: string;
+}
+
+export interface PackageAnalytics {
+  chart_id: string;
+  owner_id: string;
+  name: string;
+  downloads: number;
+  versions_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminUser {
   id: string;
   username: string;
   email: string;
+  role?: "Owner" | "Admin" | "User";
   is_admin: number;
   banned_at: string | null;
   storage_usage_bytes: number;
@@ -305,8 +339,12 @@ export const adminApi = {
   purgeUser: (id: string) => api.delete(`/admin/users/${id}`),
   setQuota: (id: string, quota_bytes: number | null) =>
     api.put(`/admin/users/${id}/quota`, { quota_bytes }),
+  updateUserRole: (userId: string, role: string) =>
+    api.put(`/admin/users/${userId}/role`, { role }).then((r) => r.data),
   deleteChart: (owner: string, chartName: string) =>
     api.delete(`/admin/charts/${owner}/${chartName}`),
+  getInstanceAnalytics: () =>
+    api.get<InstanceAnalytics>("/admin/analytics/instance").then((r) => r.data),
   getAuthProviders: () =>
     api.get<{
       local_enabled: boolean;

@@ -16,11 +16,13 @@ import {
   Link,
   CheckCircle2,
   Loader2,
+  Package,
 } from "lucide-react";
 import {
   tokensApi,
   githubApi,
   gitlabApi,
+  chartsApi,
   type ApiToken,
   type CreatedToken,
   type TokenTtlDays,
@@ -30,6 +32,7 @@ import {
 } from "../lib/api";
 import { useAuthStore } from "../stores/auth";
 import { useSettings } from "../hooks/useSettings";
+import { usePermissions } from "../hooks/usePermissions";
 import { Seo } from "../components/Seo";
 
 const TTL_OPTIONS: { label: string; value: TokenTtlDays }[] = [
@@ -897,6 +900,80 @@ function GitLabSection() {
   );
 }
 
+// ── My Packages Section ────────────────────────────────────────────────────────
+
+function MyPackagesSection() {
+  const { user } = useAuthStore();
+  const permissions = usePermissions();
+  const { data: packages, isLoading } = useQuery({
+    queryKey: ["charts", "my"],
+    queryFn: () =>
+      chartsApi.listByOwner(user?.username ?? "").then((r) => r.data),
+    enabled: !!user,
+  });
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-base font-semibold text-white flex items-center gap-2">
+       <Package className="w-4 h-4 text-violet-400" />
+       My Packages
+      </h2>
+
+      {isLoading ? (
+       <div className="space-y-2">
+         {[1, 2].map((i) => (
+           <div
+             key={i}
+             className="h-16 bg-gray-800 rounded-lg animate-pulse"
+           />
+         ))}
+       </div>
+      ) : packages && packages.length > 0 ? (
+       <div className="space-y-3">
+         {packages.map((pkg) => (
+           <div
+             key={pkg.id}
+             className="p-4 border border-gray-800 bg-gray-900 rounded-lg hover:border-gray-700 transition-colors"
+           >
+             <div className="flex justify-between items-start mb-2">
+               <div className="flex-1 min-w-0">
+                 <h3 className="font-semibold text-white truncate">
+                   {pkg.name}
+                 </h3>
+                 {pkg.description && (
+                   <p className="text-sm text-gray-400 truncate">
+                     {pkg.description}
+                   </p>
+                 )}
+               </div>
+               <div className="ml-4 text-right">
+                 <div className="text-2xl font-bold text-violet-400">
+                   {pkg.download_count}
+                 </div>
+                 <div className="text-xs text-gray-500">downloads</div>
+               </div>
+             </div>
+
+             {permissions.canViewPackageAnalytics(pkg.owner_id) && (
+               <button className="text-xs text-violet-400 hover:text-violet-300 mt-2">
+                 📊 View Analytics
+               </button>
+             )}
+           </div>
+         ))}
+       </div>
+      ) : (
+       <div className="text-center py-10 text-gray-600 border border-gray-800 rounded-lg">
+         📦
+         <p className="text-sm mt-2">No packages yet.</p>
+       </div>
+      )}
+    </div>
+  );
+}
+
+// ── Profile ────────────────────────────────────────────────────────────────────
+
 export function Profile() {
   const { user } = useAuthStore();
   const { app_name } = useSettings();
@@ -1038,6 +1115,9 @@ export function Profile() {
 
       {/* GitLab */}
       <GitLabSection />
+
+      {/* My Packages */}
+      <MyPackagesSection />
 
       {/* Access tokens */}
       <div className="space-y-4">

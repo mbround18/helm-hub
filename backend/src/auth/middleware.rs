@@ -106,6 +106,7 @@ async fn resolve_api_token(state: &AppState, raw_token: &str) -> Result<Claims, 
         sub: user.id.to_string(),
         username: user.username,
         is_admin,
+        role: Some(user.role.as_str().to_string()),
         iat: Utc::now().timestamp(),
         exp: expires_at.timestamp(),
     })

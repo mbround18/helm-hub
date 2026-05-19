@@ -88,7 +88,7 @@ pub async fn sync(
             }
 
             // Extract the filename from the URL
-            let filename = asset.url.split('/').last().unwrap_or("");
+            let filename = asset.url.split('/').next_back().unwrap_or("");
             
             let Some((chart_name, version)) = parse_asset_name(filename) else {
                 tracing::debug!(asset = %filename, "Skipping unrecognised asset name");

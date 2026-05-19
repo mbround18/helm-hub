@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::schema::users;
+use crate::{schema::users, db::user_role::UserRole};
 
 #[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize, Identifiable)]
 #[diesel(table_name = users)]
@@ -18,6 +18,7 @@ pub struct User {
     pub totp_secret: Option<String>,
     pub totp_enabled: bool,
     pub is_admin: bool,
+    pub role: UserRole,
     pub banned_at: Option<DateTime<Utc>>,
     pub storage_usage_bytes: i64,
     pub storage_quota_bytes: Option<i64>,
@@ -31,7 +32,11 @@ impl User {
     }
 
     pub fn is_admin(&self) -> bool {
-        self.is_admin
+        self.is_admin || self.role.is_admin_or_higher()
+    }
+
+    pub fn is_owner(&self) -> bool {
+        self.role.is_owner()
     }
 
     pub fn is_banned(&self) -> bool {
@@ -49,6 +54,7 @@ pub struct NewUser {
     pub totp_secret: Option<String>,
     pub totp_enabled: bool,
     pub is_admin: bool,
+    pub role: UserRole,
     pub banned_at: Option<DateTime<Utc>>,
     pub storage_usage_bytes: i64,
     pub storage_quota_bytes: Option<i64>,
@@ -67,6 +73,7 @@ impl NewUser {
             totp_secret: None,
             totp_enabled: false,
             is_admin: false,
+            role: UserRole::User,
             banned_at: None,
             storage_usage_bytes: 0,
             storage_quota_bytes: None,
@@ -103,6 +110,7 @@ impl Default for UpdateUser {
 #[diesel(table_name = users)]
 pub struct AdminUpdateUser {
     pub is_admin: Option<bool>,
+    pub role: Option<UserRole>,
     pub banned_at: Option<Option<DateTime<Utc>>>,
     pub storage_quota_bytes: Option<Option<i64>>,
     pub updated_at: DateTime<Utc>,

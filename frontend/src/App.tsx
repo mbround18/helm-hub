@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -6,8 +6,9 @@ import {
   Navigate,
   Outlet,
 } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "./stores/auth";
+import { authApi } from "./lib/api";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -44,6 +45,43 @@ const Register = lazy(async () => ({
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, clearAuth, setUser } = useAuthStore();
+  const authed = isAuthenticated();
+  const {
+    data: me,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["auth-me"],
+    queryFn: () => authApi.me().then((r) => r.data),
+    enabled: authed,
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const status = (error as any)?.response?.status;
+  const unauthorized = status === 401 || status === 404;
+
+  useEffect(() => {
+    if (me) setUser(me);
+  }, [me, setUser]);
+
+  useEffect(() => {
+    if (unauthorized) clearAuth();
+  }, [unauthorized, clearAuth]);
+
+  if (!authed) return <Navigate to="/login" replace />;
+  if (unauthorized) return <Navigate to="/login" replace />;
+  if (isLoading) return <PageFallback />;
+  if (!me) return <Navigate to="/" replace />;
+
+  const role = me.role || (me.is_admin ? "Admin" : "User");
+  const isAdminOrOwner = role === "Owner" || role === "Admin";
+  return isAdminOrOwner ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 function AuthPageFallback() {
@@ -172,9 +210,9 @@ export default function App() {
             <Route
               path="/admin"
               element={
-                <ProtectedRoute>
+                <AdminRoute>
                   <Admin />
-                </ProtectedRoute>
+                </AdminRoute>
               }
             />
           </Route>

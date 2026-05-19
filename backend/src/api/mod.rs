@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod analytics;
 pub mod artifacts;
 pub mod auth;
 pub mod auth_providers;

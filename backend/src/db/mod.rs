@@ -5,6 +5,7 @@ use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 pub mod models;
+pub mod user_role;
 
 use crate::{AppState, auth::jwt::Claims, error::AppError};
 
@@ -35,6 +36,13 @@ impl FromRequestParts<AppState> for RlsConn {
             set_current_user(&mut conn, &claims.sub, claims.is_admin)
                 .await
                 .map_err(|e| AppError::Internal(format!("Failed to set RLS context: {e}")))?;
+        } else {
+            sql_query(
+                "SELECT set_config('app.current_user_id', '', false), set_config('app.is_admin', 'false', false)",
+            )
+            .execute(&mut conn)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to clear RLS context: {e}")))?;
         }
 
         Ok(RlsConn(conn))
@@ -56,8 +64,10 @@ pub async fn set_current_user(
     user_id: &str,
     is_admin: bool,
 ) -> Result<(), diesel::result::Error> {
+    // Use session-scoped settings (`is_local = false`) so values remain visible
+    // to subsequent statements in the same request under autocommit.
     sql_query(
-        "SELECT set_config('app.current_user_id', $1, true), set_config('app.is_admin', $2, true)",
+        "SELECT set_config('app.current_user_id', $1, false), set_config('app.is_admin', $2, false)",
     )
     .bind::<diesel::sql_types::Text, _>(user_id)
     .bind::<diesel::sql_types::Text, _>(if is_admin { "true" } else { "false" })

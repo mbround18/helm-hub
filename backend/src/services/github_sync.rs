@@ -209,6 +209,7 @@ async fn fetch_releases(
         .map_err(|e| AppError::Internal(format!("Failed to parse GitHub releases: {e}")))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_and_import(
     state: &AppState,
     conn: &mut crate::db::DbConn,

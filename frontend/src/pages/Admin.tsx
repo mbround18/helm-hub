@@ -27,10 +27,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  BarChart3,
 } from "lucide-react";
 import { adminApi, settingsApi, type AdminUser } from "../lib/api";
 import { useAuthStore } from "../stores/auth";
 import { useSettings } from "../hooks/useSettings";
+import { usePermissions } from "../hooks/usePermissions";
 import { Seo } from "../components/Seo";
 import { Navigate } from "react-router-dom";
 
@@ -163,10 +165,20 @@ function AuthProvidersPanel() {
   const qc = useQueryClient();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const { data } = useQuery({
+  const { data, error: queryError } = useQuery({
     queryKey: ["admin-auth-providers"],
     queryFn: () => adminApi.getAuthProviders().then((r) => r.data),
   });
+
+  useEffect(() => {
+    if (queryError) {
+      setError(
+        (queryError as any)?.response?.data?.error ||
+        (queryError as Error)?.message ||
+        "Failed to load auth providers"
+      );
+    }
+  }, [queryError]);
   const [form, setForm] = useState({
     local_enabled: true,
     github_enabled: false,
@@ -453,6 +465,17 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
           );
         },
       }),
+      columnHelper.accessor("role", {
+        header: "Role",
+        cell: (info) => {
+          const u = info.row.original;
+          return (
+            <span className="text-xs bg-blue-950/60 text-blue-400 border border-blue-800/40 px-1.5 py-0.5 rounded">
+              {u.role || "User"}
+            </span>
+          );
+        },
+      }),
       columnHelper.accessor("email", {
         header: "Email",
         cell: (info) => (
@@ -725,6 +748,97 @@ function PaginationButton({
   );
 }
 
+// ── Analytics Panel ────────────────────────────────────────────────────────────
+
+function MetricCard({ label, value, icon }: { label: string; value: any; icon: string }) {
+  return (
+    <div className="p-4 bg-gray-900 border border-gray-800 rounded-lg">
+      <div className="text-3xl mb-2">{icon}</div>
+      <div className="text-sm text-gray-400">{label}</div>
+      <div className="text-2xl font-bold text-white">{value}</div>
+    </div>
+  );
+}
+
+function AnalyticsPanel() {
+  const permissions = usePermissions();
+  const { data: analytics, isLoading, error } = useQuery({
+    queryKey: ["admin-analytics-instance"],
+    queryFn: () => adminApi.getInstanceAnalytics(),
+  });
+
+  if (!permissions.canViewInstanceAnalytics) {
+    return (
+      <div className="p-4 bg-red-950/40 border border-red-800 text-red-400 rounded-lg flex items-center gap-2">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        Admin access required to view instance analytics.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="p-4 text-gray-400">
+        Loading analytics…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 bg-red-950/40 border border-red-800 text-red-400 rounded-lg flex items-center gap-2">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        Failed to load analytics
+      </div>
+    );
+  }
+
+  return (
+    <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5">
+      <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+        <BarChart3 className="w-4 h-4 text-violet-400" /> Instance Analytics
+      </h2>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <MetricCard
+          label="Total Users"
+          value={analytics?.total_users ?? 0}
+          icon="👥"
+        />
+        <MetricCard
+          label="Total Charts"
+          value={analytics?.total_charts ?? 0}
+          icon="📦"
+        />
+        <MetricCard
+          label="Total Downloads"
+          value={analytics?.total_downloads ?? 0}
+          icon="⬇️"
+        />
+        <MetricCard
+          label="Storage Used"
+          value={fmtBytes(analytics?.total_storage_bytes ?? 0)}
+          icon="💾"
+        />
+        <MetricCard
+          label="Storage Limit"
+          value={fmtBytes(analytics?.total_storage_limit_bytes ?? 0)}
+          icon="📏"
+        />
+        <MetricCard
+          label="Chart Versions"
+          value={analytics?.total_chart_versions ?? 0}
+          icon="📄"
+        />
+      </div>
+
+      <div className="text-sm text-gray-500">
+        Last updated: {new Date(analytics?.last_updated ?? "").toLocaleString()}
+      </div>
+    </section>
+  );
+}
+
 // ── Observability Panel ────────────────────────────────────────────────────────
 
 function ObservabilityPanel() {
@@ -732,7 +846,7 @@ function ObservabilityPanel() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [testingGrafana, setTestingGrafana] = useState(false);
-  const { data } = useQuery({
+  const { data, error: queryError } = useQuery({
     queryKey: ["admin-observability"],
     queryFn: () => adminApi.getObservability().then((r) => r.data),
   });
@@ -741,6 +855,16 @@ function ObservabilityPanel() {
     grafana_url: "",
     grafana_api_token: "",
   });
+
+  useEffect(() => {
+    if (queryError) {
+      setError(
+        (queryError as any)?.response?.data?.error ||
+        (queryError as Error)?.message ||
+        "Failed to load observability settings"
+      );
+    }
+  }, [queryError]);
 
   useEffect(() => {
     if (!data) return;
@@ -889,10 +1013,11 @@ function ObservabilityPanel() {
 
 export function Admin() {
   const { user } = useAuthStore();
+  const permissions = usePermissions();
   const { app_name } = useSettings();
-  const [tab, setTab] = useState<"general" | "auth" | "observability" | "users">("general");
+  const [tab, setTab] = useState<"general" | "auth" | "observability" | "users" | "analytics">("general");
 
-  if (!user || user.is_admin === 0) {
+  if (!user || !permissions.isAdmin) {
     return <Navigate to="/" replace />;
   }
 
@@ -918,12 +1043,16 @@ export function Admin() {
         <TabButton active={tab === "users"} onClick={() => setTab("users")}>
           Users
         </TabButton>
+        <TabButton active={tab === "analytics"} onClick={() => setTab("analytics")}>
+          📊 Analytics
+        </TabButton>
       </div>
 
       {tab === "general" && <SettingsPanel />}
       {tab === "auth" && <AuthProvidersPanel />}
       {tab === "observability" && <ObservabilityPanel />}
       {tab === "users" && <UsersPanel currentUserId={user.id} />}
+      {tab === "analytics" && <AnalyticsPanel />}
     </div>
   );
 }

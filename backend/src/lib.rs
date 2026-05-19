@@ -6,6 +6,7 @@ pub mod error;
 pub mod schema;
 pub mod services;
 pub mod telemetry;
+pub mod utils;
 
 use axum::{
     Router,
@@ -90,27 +91,25 @@ fn default_seo(path: &str, origin: &str) -> SeoTags {
 }
 
 async fn page_seo(state: &AppState, path: &str) -> SeoTags {
-    if let Some(rest) = path.strip_prefix("/charts/") {
-        let mut parts = rest.splitn(2, '/');
-        if let (Some(owner), Some(chart)) = (parts.next(), parts.next()) {
-            if let Ok(mut conn) = state.db.get().await {
-                if let Ok(chart_seo) = seo::chart_seo(&mut conn, owner, chart).await {
-                    return SeoTags {
-                        title: chart_seo.title,
-                        description: chart_seo.description,
-                        canonical: format!(
-                            "{}{}",
-                            state.config.frontend_origin.trim_end_matches('/'),
-                            chart_seo.canonical_path
-                        ),
-                        robots: "index,follow".into(),
-                        og_type: "article".into(),
-                        image: "/icons.svg".into(),
-                        twitter_card: "summary".into(),
-                    };
-                }
-            }
-        }
+    if let Some(rest) = path.strip_prefix("/charts/")
+        && let mut parts = rest.splitn(2, '/')
+        && let (Some(owner), Some(chart)) = (parts.next(), parts.next())
+        && let Ok(mut conn) = state.db.get().await
+        && let Ok(chart_seo) = seo::chart_seo(&mut conn, owner, chart).await
+    {
+        return SeoTags {
+            title: chart_seo.title,
+            description: chart_seo.description,
+            canonical: format!(
+                "{}{}",
+                state.config.frontend_origin.trim_end_matches('/'),
+                chart_seo.canonical_path
+            ),
+            robots: "index,follow".into(),
+            og_type: "article".into(),
+            image: "/icons.svg".into(),
+            twitter_card: "summary".into(),
+        };
     }
 
     default_seo(path, &state.config.frontend_origin)
@@ -177,6 +176,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/telemetry/faro", post(api::telemetry::faro_proxy))
         .route("/api/auth/register", post(api::auth::register))
         .route("/api/auth/login", post(api::auth::login))
+        .route("/api/auth/refresh", post(api::auth::refresh))
         .route(
             "/api/auth/github/callback",
             get(api::github::oauth_callback),
@@ -223,6 +223,10 @@ pub fn app(state: AppState) -> Router {
             "/api/admin/users/{id}/promote",
             post(api::admin::promote_user),
         )
+        .route(
+            "/api/admin/users/{id}/role",
+            axum::routing::put(api::admin::update_user_role),
+        )
         .route("/api/admin/users/{id}/ban", post(api::admin::ban_user))
         .route("/api/admin/users/{id}", delete(api::admin::purge_user))
         .route(
@@ -244,6 +248,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/api/admin/observability",
             get(api::admin::get_observability_settings).put(api::admin::update_observability_settings),
+        )
+        .route(
+            "/api/analytics/instance",
+            get(api::analytics::get_instance_analytics),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -301,6 +309,10 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/gitlab/repos/{id}", delete(api::gitlab::remove_repo))
         .route("/api/gitlab/repos/{id}/sync", post(api::gitlab::sync_repo))
+        .route(
+            "/api/analytics/package/{owner}/{chart}",
+            get(api::analytics::get_package_analytics),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::require_auth,

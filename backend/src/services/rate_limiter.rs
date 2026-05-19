@@ -78,14 +78,13 @@ fn classify(state: &AppState, req: &Request, remote_addr: &SocketAddr) -> (Strin
     // ── Anonymous Caller ─────────────────────────────────────────────────────
 
     // If we trust the proxy, try to get the real client IP from the forwarded header.
-    if state.config.trust_proxy {
-        if let Some(forwarded) = req.headers().get("x-forwarded-for")
-            && let Ok(s) = forwarded.to_str()
-        {
-            // X-Forwarded-For can be a comma-separated list; the first one is the client.
-            if let Some(ip) = s.split(',').next().map(|s| s.trim()) {
-                return (format!("ip:{ip}"), ANON_LIMIT);
-            }
+    if state.config.trust_proxy
+        && let Some(forwarded) = req.headers().get("x-forwarded-for")
+        && let Ok(s) = forwarded.to_str()
+    {
+        // X-Forwarded-For can be a comma-separated list; the first one is the client.
+        if let Some(ip) = s.split(',').next().map(|s| s.trim()) {
+            return (format!("ip:{ip}"), ANON_LIMIT);
         }
     }
 

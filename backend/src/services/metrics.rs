@@ -1,4 +1,5 @@
 use diesel::prelude::*;
+use diesel::sql_query;
 use diesel_async::RunQueryDsl;
 use opentelemetry::{global, metrics::Gauge};
 use std::time::Duration;
@@ -58,6 +59,10 @@ async fn update_metrics(
         .await
         .map_err(|e| crate::error::AppError::Pool(e.to_string()))?;
 
+    sql_query("SELECT set_config('app.auth_context', 'true', true)")
+        .execute(&mut conn)
+        .await?;
+
     // 1. Artifact Count
     let artifact_count: i64 = artifacts::table.count().get_result(&mut conn).await?;
     metrics::gauge!(METRIC_ARTIFACTS_TOTAL).set(artifact_count as f64);
@@ -77,11 +82,10 @@ async fn update_metrics(
     otel_users.record(user_count as f64, &[]);
 
     // 4. Total Storage Usage
-    let total_storage: Option<i64> =
-        diesel::sql_query("SELECT SUM(storage_usage_bytes)::BIGINT as sum FROM users")
-            .get_result::<TotalStorage>(&mut conn)
-            .await?
-            .sum;
+    let total_storage: Option<i64> = sql_query("SELECT SUM(storage_usage_bytes)::BIGINT as sum FROM users")
+        .get_result::<TotalStorage>(&mut conn)
+        .await?
+        .sum;
 
     let storage_val = total_storage.unwrap_or(0);
     metrics::gauge!(METRIC_STORAGE_BYTES_TOTAL).set(storage_val as f64);

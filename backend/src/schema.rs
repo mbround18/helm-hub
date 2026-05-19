@@ -190,6 +190,7 @@ diesel::table! {
         totp_secret -> Nullable<Text>,
         totp_enabled -> Bool,
         is_admin -> Bool,
+        role -> Text,
         banned_at -> Nullable<Timestamptz>,
         storage_usage_bytes -> BigInt,
         storage_quota_bytes -> Nullable<BigInt>,

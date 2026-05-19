@@ -66,6 +66,7 @@ use crate::{
         clamav::{ScanOutcome, scan_file},
         quota,
     },
+    utils::permissions::can_delete_chart,
 };
 
 /// `POST /api/artifacts/:owner`
@@ -148,7 +149,7 @@ pub async fn upload_artifact(
         tokio::fs::write(&temp_path, &bytes).await?;
 
         let outcome =
-            scan_and_persist(&state, &mut conn, &claims.sub, &owner, &bytes, &temp_path).await;
+            scan_and_persist(state, &mut conn, &claims.sub, &owner, &bytes, &temp_path).await;
 
         if let Err(e) = tokio::fs::remove_file(&temp_path).await {
             tracing::warn!(path = %temp_path.display(), error = %e, "Failed to remove temp upload file");
@@ -607,17 +608,27 @@ pub async fn delete_artifact_version(
     Path((owner, artifact_name, version)): Path<(String, String, String)>,
 ) -> Result<StatusCode, AppError> {
     let state = &state.0;
-    if claims.username != owner {
+    let actor_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+    let actor_role = claims.user_role()?;
+
+    // Resolve owner username to user_id
+    let owner_id: Uuid = users::table
+        .filter(users::username.eq(&owner))
+        .select(users::id)
+        .first(&mut conn)
+        .await
+        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+
+    // Check authorization using RBAC helpers
+    if !can_delete_chart(actor_role, owner_id, actor_id) {
         return Err(AppError::Forbidden(
-            "Cannot delete from another user's namespace".into(),
+            "Cannot delete artifact from another user's namespace".into(),
         ));
     }
 
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-
     let artifact: Artifact = artifacts::table
-        .filter(artifacts::owner_id.eq(user_id))
+        .filter(artifacts::owner_id.eq(owner_id))
         .filter(artifacts::name.eq(&artifact_name))
         .select(Artifact::as_select())
         .first(&mut conn)
@@ -651,13 +662,14 @@ pub async fn delete_artifact_version(
 
     audit(
         &mut conn,
-        Some(user_id),
+        Some(actor_id),
         "delete_version",
         "artifact_version",
         Some(av.id),
         Some(serde_json::json!({
             "artifact": artifact.name,
             "version": version,
+            "owner": owner,
         })),
     )
     .await?;
@@ -676,7 +688,7 @@ pub async fn delete_artifact_version(
     }
 
     if freed_bytes > 0 {
-        quota::release_quota(&state, user_id, freed_bytes).await;
+        quota::release_quota(state, owner_id, freed_bytes).await;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -690,17 +702,27 @@ pub async fn purge_artifact(
     Path((owner, artifact_name)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
     let state = &state.0;
-    if claims.username != owner {
+    let actor_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+    let actor_role = claims.user_role()?;
+
+    // Resolve owner username to user_id
+    let owner_id: Uuid = users::table
+        .filter(users::username.eq(&owner))
+        .select(users::id)
+        .first(&mut conn)
+        .await
+        .map_err(|_| AppError::NotFound(format!("User '{owner}' not found")))?;
+
+    // Check authorization using RBAC helpers
+    if !can_delete_chart(actor_role, owner_id, actor_id) {
         return Err(AppError::Forbidden(
-            "Cannot delete from another user's namespace".into(),
+            "Cannot delete artifact from another user's namespace".into(),
         ));
     }
 
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
-
     let artifact: Artifact = artifacts::table
-        .filter(artifacts::owner_id.eq(user_id))
+        .filter(artifacts::owner_id.eq(owner_id))
         .filter(artifacts::name.eq(&artifact_name))
         .select(Artifact::as_select())
         .first(&mut conn)
@@ -745,19 +767,19 @@ pub async fn purge_artifact(
 
     audit(
         &mut conn,
-        Some(user_id),
+        Some(actor_id),
         "purge_artifact",
         "artifact",
         Some(artifact.id),
         Some(serde_json::json!({
-            "name": artifact.name,
-            "version_count": versions.len(),
+            "artifact": artifact_name,
+            "owner": owner,
         })),
     )
     .await?;
 
     if freed_bytes > 0 {
-        quota::release_quota(&state, user_id, freed_bytes).await;
+        quota::release_quota(state, owner_id, freed_bytes).await;
     }
 
     Ok(StatusCode::NO_CONTENT)

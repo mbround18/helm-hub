@@ -1,7 +1,9 @@
 pub mod admin;
+pub mod authorization;
 pub mod jwt;
 pub mod middleware;
 pub mod password;
+pub mod token_encryption;
 pub mod totp;
 
 use rand::RngExt;

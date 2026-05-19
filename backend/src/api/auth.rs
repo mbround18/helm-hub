@@ -10,15 +10,40 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::{
-        jwt::{Claims, encode_jwt},
+        jwt::{Claims, encode_jwt, decode_jwt_without_expiry_check},
         password::{hash_password, verify_password},
         totp::{generate_secret, provisioning_uri, verify_code},
     },
-    db::models::{UpdateUser, User},
+    db::{DbConn, models::{UpdateUser, User}, user_role::UserRole},
     error::AppError,
     schema::{rate_limit_windows, users},
     services::{audit::audit, settings},
 };
+
+// ── SQL Query Result Structs ──────────────────────────────────────────────────
+use diesel::deserialize::QueryableByName;
+
+#[derive(QueryableByName, Debug)]
+struct RefreshTokenStruct {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    token: String,
+    #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+    expires_at: DateTime<Utc>,
+}
+
+#[derive(QueryableByName, Debug)]
+struct RefreshProcResult {
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    success: bool,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    message: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    new_token: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    new_refresh_token: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>)]
+    expires_at: Option<DateTime<Utc>>,
+}
 
 // ── Input validation ──────────────────────────────────────────────────────────
 
@@ -51,6 +76,88 @@ fn validate_email(email: &str) -> Result<(), AppError> {
     if email.len() > 254 || !email.contains('@') || email.starts_with('@') {
         return Err(AppError::BadRequest("Invalid email address".into()));
     }
+    Ok(())
+}
+
+fn is_bootstrap_owner(admin_username: Option<&str>, username: &str) -> bool {
+    admin_username
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.eq_ignore_ascii_case(username))
+        .unwrap_or(false)
+}
+
+pub(crate) async fn seed_user_auth_state(
+    conn: &mut DbConn,
+    user: &mut User,
+    admin_username: Option<&str>,
+) -> Result<(), AppError> {
+    let mut target_role = user.role;
+    let mut target_is_admin = user.is_admin;
+    let mut target_totp_enabled = user.totp_enabled;
+    let mut target_storage_usage = user.storage_usage_bytes;
+
+    if is_bootstrap_owner(admin_username, &user.username) {
+        target_role = UserRole::Owner;
+        target_is_admin = true;
+    } else {
+        if user.role == UserRole::User && user.is_admin {
+            target_role = UserRole::Admin;
+        }
+        if user.role.is_admin_or_higher() && !user.is_admin {
+            target_is_admin = true;
+        }
+    }
+
+    if user.totp_enabled && user.totp_secret.is_none() {
+        target_totp_enabled = false;
+    }
+
+    if user.storage_usage_bytes < 0 {
+        target_storage_usage = 0;
+    }
+
+    let needs_update = target_role != user.role
+        || target_is_admin != user.is_admin
+        || target_totp_enabled != user.totp_enabled
+        || target_storage_usage != user.storage_usage_bytes;
+
+    if !needs_update {
+        return Ok(());
+    }
+
+    sql_query("SELECT set_config('app.auth_context', 'true', true)")
+        .execute(conn)
+        .await?;
+
+    let updated = sql_query(
+        "UPDATE users
+         SET role = $1::user_role,
+             is_admin = $2,
+             totp_enabled = $3,
+             storage_usage_bytes = $4,
+             updated_at = $5
+         WHERE id = $6",
+    )
+        .bind::<diesel::sql_types::Text, _>(target_role.as_str())
+        .bind::<diesel::sql_types::Bool, _>(target_is_admin)
+        .bind::<diesel::sql_types::Bool, _>(target_totp_enabled)
+        .bind::<diesel::sql_types::BigInt, _>(target_storage_usage)
+        .bind::<diesel::sql_types::Timestamptz, _>(Utc::now())
+        .bind::<diesel::sql_types::Uuid, _>(user.id)
+        .execute(conn)
+        .await?;
+
+    if updated == 0 {
+        return Err(AppError::NotFound(
+            "User not found during auth state seeding".into(),
+        ));
+    }
+
+    user.role = target_role;
+    user.is_admin = target_is_admin;
+    user.totp_enabled = target_totp_enabled;
+    user.storage_usage_bytes = target_storage_usage;
     Ok(())
 }
 
@@ -214,13 +321,19 @@ pub async fn register(
         .get()
         .await
         .map_err(|e| AppError::Pool(e.to_string()))?;
+    let admin_username = state.config.admin_username.as_deref().unwrap_or("");
 
-    let user: User = sql_query("SELECT * FROM auth.register_user($1, $2, $3)")
+    let mut user: User = sql_query("SELECT * FROM auth.register_user($1, $2, $3, $4)")
         .bind::<diesel::sql_types::Text, _>(&req.username)
         .bind::<diesel::sql_types::Text, _>(&req.email)
         .bind::<diesel::sql_types::Text, _>(&hash)
+        .bind::<diesel::sql_types::Text, _>(admin_username)
         .get_result(&mut conn)
         .await?;
+
+    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+        tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during register");
+    }
 
     audit(
         &mut conn,
@@ -247,6 +360,8 @@ pub struct LoginRequest {
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub token: String,
+    pub refresh_token: String,
+    pub expires_in: i64,
     pub user: User,
 }
 
@@ -263,23 +378,61 @@ pub async fn login(
         .get()
         .await
         .map_err(|e| AppError::Pool(e.to_string()))?;
+    let admin_username = state.config.admin_username.as_deref().unwrap_or("");
 
     // Use a constant-time-friendly error: same message for "no such user" and
     // "wrong password" to prevent username enumeration.
-    let mut user: User = sql_query("SELECT * FROM auth.login_user($1)")
+    let mut created_via_bootstrap = false;
+    let mut user: User = match sql_query("SELECT * FROM auth.login_user($1, $2)")
         .bind::<diesel::sql_types::Text, _>(&username)
+        .bind::<diesel::sql_types::Text, _>(admin_username)
         .get_result(&mut conn)
         .await
-        .map_err(|_| {
-            let state_clone = state.clone();
-            let username_clone = req.username.clone();
-            tokio::spawn(async move {
-                record_failed_login(&state_clone, &username_clone).await;
-            });
-            AppError::Unauthorized("Invalid credentials".into())
-        })?;
+    {
+        Ok(user) => user,
+        Err(_) => {
+            // Self-heal path: if bootstrap admin is missing, seed it on first login.
+            if is_bootstrap_owner(state.config.admin_username.as_deref(), &username) {
+                let hash = hash_password(&req.password)?;
+                let bootstrap_email = format!("{username}@bootstrap.local");
+                match sql_query("SELECT * FROM auth.register_user($1, $2, $3, $4)")
+                    .bind::<diesel::sql_types::Text, _>(&username)
+                    .bind::<diesel::sql_types::Text, _>(&bootstrap_email)
+                    .bind::<diesel::sql_types::Text, _>(&hash)
+                    .bind::<diesel::sql_types::Text, _>(admin_username)
+                    .get_result::<User>(&mut conn)
+                    .await
+                {
+                    Ok(user) => {
+                        created_via_bootstrap = true;
+                        tracing::info!(
+                            username = %username,
+                            user_id = %user.id,
+                            "Bootstrapped missing admin user during login",
+                        );
+                        user
+                    }
+                    Err(_) => {
+                        let state_clone = state.clone();
+                        let username_clone = req.username.clone();
+                        tokio::spawn(async move {
+                            record_failed_login(&state_clone, &username_clone).await;
+                        });
+                        return Err(AppError::Unauthorized("Invalid credentials".into()));
+                    }
+                }
+            } else {
+                let state_clone = state.clone();
+                let username_clone = req.username.clone();
+                tokio::spawn(async move {
+                    record_failed_login(&state_clone, &username_clone).await;
+                });
+                return Err(AppError::Unauthorized("Invalid credentials".into()));
+            }
+        }
+    };
 
-    if !verify_password(&req.password, &user.password_hash)? {
+    if !created_via_bootstrap && !verify_password(&req.password, &user.password_hash)? {
         record_failed_login(&state, &req.username).await;
         return Err(AppError::Unauthorized("Invalid credentials".into()));
     }
@@ -288,17 +441,8 @@ pub async fn login(
         return Err(AppError::Forbidden("Account suspended".into()));
     }
 
-    // Auto-promote the bootstrap admin on their first login so the DB stays
-    // consistent and the returned user object / JWT both carry is_admin=true.
-    if !user.is_admin && state.config.admin_username.as_deref() == Some(user.username.as_str()) {
-        let _ = diesel::update(users::table.filter(users::id.eq(&user.id)))
-            .set((
-                crate::schema::users::is_admin.eq(true),
-                crate::schema::users::updated_at.eq(chrono::Utc::now()),
-            ))
-            .execute(&mut conn)
-            .await;
-        user.is_admin = true;
+    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+        tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during login");
     }
 
     if user.totp_enabled {
@@ -318,13 +462,38 @@ pub async fn login(
         }
     }
 
-    let claims = Claims::new(
+    let claims = Claims::new_with_minutes(
         &user.id.to_string(),
         &user.username,
         user.is_admin,
-        state.config.jwt_expiry_hours,
+        user.role,
+        15, // 15 minutes
     );
     let token = encode_jwt(&claims, &state.config.jwt_secret)?;
+
+    // Issue refresh token from stored procedure
+    let refresh_results = sql_query(
+        "SELECT token, expires_at FROM auth.issue_refresh_token($1, 168)"
+    )
+        .bind::<diesel::sql_types::Uuid, _>(user.id)
+        .load::<RefreshTokenStruct>(&mut conn)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to issue refresh token: {}", e)))?;
+
+    let refresh_result = refresh_results
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::Internal("No refresh token returned".into()))?;
+
+    let refresh_token_plaintext = refresh_result.token;
+    let _refresh_expires_at = refresh_result.expires_at;
+    
+    // Encrypt refresh token for secure localStorage storage
+    use crate::auth::token_encryption::encrypt_token;
+    let refresh_token_encrypted = encrypt_token(&refresh_token_plaintext, &user.id)?;
+
+    // Calculate JWT expiry in seconds for client
+    let expires_in = 15 * 60; // 15 minutes in seconds
 
     audit(
         &mut conn,
@@ -336,7 +505,104 @@ pub async fn login(
     )
     .await?;
 
-    Ok(Json(LoginResponse { token, user }))
+    Ok(Json(LoginResponse {
+        token,
+        refresh_token: refresh_token_encrypted,
+        expires_in,
+        user,
+    }))
+}
+
+// ── Token Refresh ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshRequest {
+    pub token: String,       // Old JWT (may be expired, but still decodable)
+    pub refresh_token: String, // Encrypted refresh token
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshResponse {
+    pub token: String,
+    pub refresh_token: String,
+    pub expires_in: i64,
+}
+
+pub async fn refresh(
+    State(state): State<AppState>,
+    Json(req): Json<RefreshRequest>,
+) -> Result<Json<RefreshResponse>, AppError> {
+    // Extract user_id from JWT claim before it expires
+    // The user sends both the (possibly expired) JWT and refresh token
+    let claims = decode_jwt_without_expiry_check(&req.token, &state.config.jwt_secret)?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| AppError::Pool(e.to_string()))?;
+
+    // Decrypt the refresh token
+    use crate::auth::token_encryption::decrypt_token;
+    let refresh_token_plaintext = decrypt_token(&req.refresh_token, &user_id)?;
+
+    // Hash refresh token for DB lookup (same as stored in DB)
+    let token_hash = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(refresh_token_plaintext.as_bytes()))
+    );
+
+    // Call stored procedure to validate and rotate token
+    let results = sql_query(
+        "SELECT success, message, new_token, new_refresh_token, expires_at FROM auth.refresh_access_token($1, $2)"
+    )
+        .bind::<diesel::sql_types::Text, _>(&token_hash)
+        .bind::<diesel::sql_types::Uuid, _>(user_id)
+        .load::<RefreshProcResult>(&mut conn)
+        .await
+        .map_err(|e| AppError::Internal(format!("Token refresh failed: {}", e)))?;
+
+    let result = results
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::Internal("No result from refresh token procedure".into()))?;
+
+    if !result.success {
+        return Err(AppError::Unauthorized(result.message));
+    }
+
+    // Get the new refresh token plaintext from stored procedure (will issue new one)
+    let new_refresh_token_plaintext = result.new_refresh_token
+        .ok_or_else(|| AppError::Internal("Stored procedure did not return new refresh token".into()))?;
+
+    // Encrypt the new refresh token
+    use crate::auth::token_encryption::encrypt_token;
+    let new_refresh_token_encrypted = encrypt_token(&new_refresh_token_plaintext, &user_id)?;
+
+    // Get user for new JWT
+    let user: User = users::table
+        .find(user_id)
+        .first(&mut conn)
+        .await
+        .map_err(|_| AppError::Unauthorized("User not found".into()))?;
+
+    // Issue new JWT (short-lived, 15 minutes)
+    let new_claims = Claims::new_with_minutes(
+        &user.id.to_string(),
+        &user.username,
+        user.is_admin,
+        user.role,
+        15, // 15 minutes
+    );
+    let new_token = encode_jwt(&new_claims, &state.config.jwt_secret)?;
+
+    Ok(Json(RefreshResponse {
+        token: new_token,
+        refresh_token: new_refresh_token_encrypted,
+        expires_in: 15 * 60, // 15 minutes in seconds
+    }))
 }
 
 // ── TOTP Setup ────────────────────────────────────────────────────────────────

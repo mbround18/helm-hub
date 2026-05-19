@@ -1,6 +1,9 @@
+# syntax=docker/dockerfile:1
+# Build with: DOCKER_BUILDKIT=1 docker build [OPTIONS] .
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Stage 1 — Frontend build
-#   Node 20 Alpine: install dependencies, run Vite production build.
+#   Node 24 Alpine: install dependencies, run Vite production build.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FROM node:24-alpine AS frontend-builder
 
@@ -17,12 +20,13 @@ ENV VITE_OTEL_COLLECTOR_ENDPOINT=$VITE_OTEL_COLLECTOR_ENDPOINT
 # package.json / lockfile change.
 COPY frontend/package.json frontend/pnpm-lock.yaml ./frontend/
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile
 
 COPY frontend/ ./frontend/
 
-
-RUN pnpm -r build
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm -r build
 # Output: /app/frontend/dist
 
 
@@ -37,7 +41,8 @@ RUN cargo install cargo-chef --locked
 
 WORKDIR /app
 COPY backend/ .
-RUN cargo chef prepare --recipe-path recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo chef prepare --recipe-path recipe.json
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -59,7 +64,42 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Stage 2c — Rust application build
+# Stage 2c — Rust test runner
+#   Runs the full test suite. If tests fail, the build fails immediately.
+#   This stage can be skipped during development with:
+#     docker build --target backend-builder -t helm-hub-dev
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FROM rust:1.95 AS backend-tester
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Pull in the pre-built dependency cache
+COPY --from=rust-cacher /app/target target
+COPY --from=rust-cacher /usr/local/cargo /usr/local/cargo
+
+COPY backend/ .
+
+# Run all tests — this stage fails if any test fails
+# Including:
+#   • Unit tests (src/**/*.rs)
+#   • Integration tests (tests/**/*.rs)
+#   • Doc tests
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=target \
+    cargo test --release
+
+# Run clippy to catch potential bugs
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=target \
+    cargo clippy --all-targets --all-features -- -D warnings
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Stage 2d — Rust application build
 #   Only this layer is rebuilt when application source changes.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FROM rust:1.95 AS backend-builder
@@ -75,9 +115,9 @@ COPY --from=rust-cacher /app/target target
 COPY --from=rust-cacher /usr/local/cargo /usr/local/cargo
 
 COPY backend/ .
-RUN cargo build --release --bin helm-hub
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release --bin helm-hub
 # Output: /app/target/release/helm-hub
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Stage 3 — Runtime image
@@ -168,3 +208,4 @@ EXPOSE 3000 9090
 # tini as PID 1 — forwards signals and reaps zombie processes created when
 # we background clamd in the entrypoint.
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
+CMD ["/app/helm-hub"]

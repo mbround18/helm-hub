@@ -24,6 +24,7 @@ import {
 } from "../lib/api";
 import { ChartDetail } from "../components/ChartDetail";
 import { useAuthStore } from "../stores/auth";
+import { usePermissions } from "../hooks/usePermissions";
 import { useSettings } from "../hooks/useSettings";
 import { Seo } from "../components/Seo";
 import clsx from "clsx";
@@ -83,6 +84,7 @@ function ConfirmModal({
 export function Dashboard() {
   const { user } = useAuthStore();
   const { app_name } = useSettings();
+  const permissions = usePermissions();
   const qc = useQueryClient();
   const [selectedChart, setSelectedChart] = useState<Chart | null>(null);
   const [viewChart, setViewChart] = useState<Chart | null>(null);
@@ -428,7 +430,7 @@ done`}
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                   {selectedChart.name} — versions
                 </h2>
-                <button
+               <button
                   onClick={() =>
                     setConfirm({
                       title: `Purge ${selectedChart.name}`,
@@ -437,7 +439,14 @@ done`}
                       onConfirm: () => purgeChart.mutate(selectedChart.name),
                     })
                   }
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-white hover:bg-red-600 border border-red-800 hover:border-red-600 rounded-lg transition-colors"
+                  disabled={!permissions.canDeleteOwnCharts}
+                  className={clsx(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-lg transition-colors",
+                    permissions.canDeleteOwnCharts
+                      ? "text-red-400 hover:text-white hover:bg-red-600 border-red-800 hover:border-red-600"
+                      : "text-gray-500 border-gray-700 cursor-not-allowed opacity-50"
+                  )}
+                  title={!permissions.canDeleteOwnCharts ? "You don't have permission to delete charts" : ""}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Purge chart

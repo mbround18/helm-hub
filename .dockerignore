@@ -1,4 +1,65 @@
+# Build artifacts
 target
 node_modules
 dist
+*.o
+*.a
+*.so
+
+# Development
 .claude
+.env
+.env.local
+.env.*.local
+
+# Version control
+.git
+.gitignore
+.github
+
+# Documentation
+docs
+*.md
+GEMINI.md
+PHASE_6_COMPLETION.md
+INTEGRATION_TESTS.md
+TEST_FILES_MANIFEST.md
+
+# IDE & editor config
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test files (kept in image for test stage)
+# but not needed in runtime
+cypress
+test-results
+
+# CI/CD (not needed in image)
+.github
+
+# Temporary files
+tmp
+.tmp
+*.log
+
+# Node specific
+.npm
+.eslintcache
+pnpm-debug.log
+
+# Rust specific
+.cargo
+Cargo.lock.bk
+
+# System
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Scripts (not needed in production)
+scripts/

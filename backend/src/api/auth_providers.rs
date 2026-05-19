@@ -13,11 +13,12 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
+    api::auth::seed_user_auth_state,
     auth::{
         jwt::{Claims, encode_jwt},
         password::hash_password,
     },
-    db::models::User,
+    db::{models::User, set_current_user},
     error::AppError,
     schema::users,
     services::{audit::audit, auth_providers},
@@ -453,7 +454,7 @@ async fn oauth_callback(
         Err(_) => return redirect_err(),
     };
 
-    let user: User = match diesel::sql_query("SELECT * FROM auth.upsert_oauth_user($1, $2, $3, $4, $5)")
+    let mut user: User = match diesel::sql_query("SELECT * FROM auth.upsert_oauth_user($1, $2, $3, $4, $5)")
         .bind::<diesel::sql_types::Text, _>(provider)
         .bind::<diesel::sql_types::Text, _>(&provider_account_id)
         .bind::<diesel::sql_types::Text, _>(email.as_deref().unwrap_or(""))
@@ -466,10 +467,16 @@ async fn oauth_callback(
         Err(_) => return redirect_err(),
     };
 
+    // Assign Owner role if this user matches the bootstrap admin username
+    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+        tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during oauth login");
+    }
+
     let claims = Claims::new(
         &user.id.to_string(),
         &user.username,
         user.is_admin,
+        user.role,
         state.config.jwt_expiry_hours,
     );
     let token = match encode_jwt(&claims, &state.config.jwt_secret) {
@@ -724,10 +731,23 @@ pub async fn me(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
     let mut conn = state.db.get().await.map_err(|e| AppError::Pool(e.to_string()))?;
-    let user: User = users::table
+    set_current_user(&mut conn, &claims.sub, claims.is_admin)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to set RLS context: {e}")))?;
+    let mut user: User = users::table
         .filter(users::id.eq(user_id))
         .select(User::as_select())
         .first(&mut conn)
-        .await?;
+        .await
+        .map_err(|e| match e {
+            diesel::result::Error::NotFound => {
+                AppError::Unauthorized("Session user not found; please sign in again".into())
+            }
+            _ => AppError::from(e),
+        })?;
+
+    if let Err(e) = seed_user_auth_state(&mut conn, &mut user, state.config.admin_username.as_deref()).await {
+        tracing::warn!(user_id = %user.id, username = %user.username, error = %e, "Auth state seeding failed during /auth/me");
+    }
     Ok(Json(user))
 }

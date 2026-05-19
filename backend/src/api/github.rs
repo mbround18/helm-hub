@@ -157,6 +157,7 @@ async fn get_github_user(
         .map_err(|_| AppError::Internal("Failed to parse GitHub user response".into()))
 }
 
+#[allow(dead_code)]
 fn github_not_configured() -> AppError {
     AppError::Internal(
         "GitHub OAuth is not configured on this server. \

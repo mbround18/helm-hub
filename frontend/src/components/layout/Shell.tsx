@@ -3,21 +3,45 @@ import { LogOut, User, LayoutDashboard, Search, Settings } from "lucide-react";
 import { useAuthStore } from "../../stores/auth";
 import { AppLogo } from "../AppLogo";
 import clsx from "clsx";
+import { usePermissions } from "../../hooks/usePermissions";
+import { useQuery } from "@tanstack/react-query";
+import { authApi } from "../../lib/api";
+import { useEffect } from "react";
 
 interface ShellProps {
   children: React.ReactNode;
 }
 
 export function Shell({ children }: ShellProps) {
-  const { user, clearAuth, isAuthenticated } = useAuthStore();
+  const { user, clearAuth, isAuthenticated, setUser } = useAuthStore();
+  const { isAdmin } = usePermissions();
   const navigate = useNavigate();
+
+  const { data: freshUser, error: meError } = useQuery({
+    queryKey: ["auth-me"],
+    queryFn: () => authApi.me().then((r) => r.data),
+    enabled: isAuthenticated(),
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (freshUser) setUser(freshUser);
+  }, [freshUser, setUser]);
+
+  useEffect(() => {
+    const status = (meError as any)?.response?.status;
+    if (status === 401 || status === 404) {
+      clearAuth();
+      navigate("/login", { replace: true });
+    }
+  }, [meError, clearAuth, navigate]);
 
   const handleLogout = () => {
     clearAuth();
     navigate("/login");
   };
-
-  const isAdmin = (user?.is_admin ?? 0) !== 0;
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex">

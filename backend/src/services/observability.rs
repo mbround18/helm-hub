@@ -9,10 +9,10 @@ use crate::{
 /// Retrieves the OTEL endpoint from app_settings, falling back to env var.
 pub async fn otel_endpoint(conn: &mut DbConn) -> Option<String> {
     // Try to get from app_settings first
-    if let Some(endpoint) = auth_providers::opt_setting(conn, auth_providers::KEY_OTEL_ENDPOINT).await {
-        if !endpoint.is_empty() {
-            return Some(endpoint);
-        }
+    if let Some(endpoint) = auth_providers::opt_setting(conn, auth_providers::KEY_OTEL_ENDPOINT).await
+        && !endpoint.is_empty()
+    {
+        return Some(endpoint);
     }
     
     // Fall back to env var

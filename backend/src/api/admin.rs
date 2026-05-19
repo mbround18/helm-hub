@@ -21,10 +21,12 @@ use crate::{
     db::{
         RlsConn,
         models::{AdminUpdateUser, Artifact, ArtifactVersion, User},
+        user_role::UserRole,
     },
     error::AppError,
     schema::{artifact_versions, artifacts, users},
     services::{audit::audit, auth_providers, settings},
+    utils::permissions::can_promote_to,
 };
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
@@ -85,6 +87,7 @@ pub async fn promote_user(
             is_admin: Some(true),
             banned_at: None,
             storage_quota_bytes: None,
+            role: None,
             updated_at: Utc::now(),
         })
         .execute(&mut conn)
@@ -97,6 +100,131 @@ pub async fn promote_user(
     audit(&mut conn, admin_id, "promote", "user", Some(id), None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ── PUT /api/admin/users/:id/role ────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct UpdateRoleRequest {
+    /// The new role to assign (e.g., "User", "Admin", "Owner")
+    pub role: String,
+}
+
+/// Update a user's role with RBAC authorization checks.
+/// 
+/// # Rules
+/// - Owner can promote to any role
+/// - Admin can promote to User or Admin (but not Owner)
+/// - User cannot promote anyone
+/// - Cannot downgrade an existing Owner
+/// - Cannot promote a banned user
+pub async fn update_user_role(
+    state: State<AppState>,
+    Extension(claims): Extension<Claims>,
+    RlsConn(mut conn): RlsConn,
+    Path(target_user_id): Path<Uuid>,
+    Json(req): Json<UpdateRoleRequest>,
+) -> Result<Json<UserSummary>, AppError> {
+    let _state = &state.0;
+    let actor_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| AppError::Internal(format!("Invalid user_id in claims: {e}")))?;
+    
+    // Prevent self-modification
+    if actor_id == target_user_id {
+        return Err(AppError::BadRequest(
+            "Cannot change your own role".into(),
+        ));
+    }
+
+    // Parse the target role
+    let target_role = UserRole::parse(&req.role)
+        .ok_or_else(|| AppError::BadRequest(format!("Invalid role: {}", req.role)))?;
+
+    // Get the current user (actor) role
+    let actor_user: User = users::table
+        .filter(users::id.eq(&actor_id))
+        .select(User::as_select())
+        .first(&mut conn)
+        .await
+        .map_err(|_| AppError::NotFound("Actor user not found".into()))?;
+
+    let actor_role = actor_user.role;
+
+    // Check if actor can promote to the target role
+    if !can_promote_to(actor_role, target_role) {
+        return Err(AppError::Forbidden(
+            format!(
+                "Your role ({}) cannot promote to {}",
+                actor_role.as_str(),
+                target_role.as_str()
+            ),
+        ));
+    }
+
+    // Get the target user
+    let target_user: User = users::table
+        .filter(users::id.eq(&target_user_id))
+        .select(User::as_select())
+        .first(&mut conn)
+        .await
+        .map_err(|_| AppError::NotFound("Target user not found".into()))?;
+
+    // Prevent downgrading Owner role
+    if target_user.role.is_owner() && !target_role.is_owner() {
+        return Err(AppError::Forbidden(
+            "Cannot downgrade an Owner role".into(),
+        ));
+    }
+
+    // Prevent promoting banned users
+    if target_user.is_banned() {
+        return Err(AppError::BadRequest(
+            "Cannot change the role of a banned user".into(),
+        ));
+    }
+
+    // Record old role for audit log
+    let old_role = target_user.role;
+
+    // Update the role in the database
+    let updated = diesel::update(users::table.filter(users::id.eq(&target_user_id)))
+        .set(AdminUpdateUser {
+            is_admin: None,
+            banned_at: None,
+            storage_quota_bytes: None,
+            role: Some(target_role),
+            updated_at: Utc::now(),
+        })
+        .execute(&mut conn)
+        .await?;
+
+    if updated == 0 {
+        return Err(AppError::NotFound("User not found".into()));
+    }
+
+    // Audit log the role change
+    audit(
+        &mut conn,
+        Some(actor_id),
+        "role_updated",
+        "user",
+        Some(target_user_id),
+        Some(serde_json::json!({
+            "old_role": old_role.as_str(),
+            "new_role": target_role.as_str(),
+        })),
+    )
+    .await?;
+
+    // Fetch updated user and return as summary
+    let updated_user: User = users::table
+        .filter(users::id.eq(&target_user_id))
+        .select(User::as_select())
+        .first(&mut conn)
+        .await?;
+
+    Ok(Json(UserSummary::from(updated_user)))
+}
+
 
 // ── POST /api/admin/users/:id/ban ────────────────────────────────────────────
 
@@ -119,6 +247,7 @@ pub async fn ban_user(
             is_admin: None,
             banned_at: Some(Some(now)),
             storage_quota_bytes: None,
+            role: None,
             updated_at: now,
         })
         .execute(&mut conn)
@@ -274,6 +403,7 @@ pub async fn set_user_quota(
             is_admin: None,
             banned_at: None,
             storage_quota_bytes: Some(body.quota_bytes),
+            role: None,
             updated_at: Utc::now(),
         })
         .execute(&mut conn)
