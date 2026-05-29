@@ -58,7 +58,7 @@ uuid = { version = "1.23.1", features = ["v4", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 
 # Helm / archive
-tar = "0.4.45"
+tar = "0.4.46"
 flate2 = "1.1.9"
 sha2 = "0.11.0"
 
