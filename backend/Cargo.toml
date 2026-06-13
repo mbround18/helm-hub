@@ -90,7 +90,7 @@ metrics = "0.24.6"
 metrics-exporter-prometheus = "0.18.3"
 
 # OpenTelemetry — optional OTLP export (activated when OTEL_EXPORTER_OTLP_ENDPOINT is set)
-opentelemetry = { version = "0.31.0", features = ["trace", "metrics"] }
+opentelemetry = { version = "0.32.0", features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.31.0", features = [
   "rt-tokio",
   "trace",
