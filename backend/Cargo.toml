@@ -96,7 +96,7 @@ opentelemetry_sdk = { version = "0.31.0", features = [
   "trace",
   "metrics",
 ] }
-opentelemetry-otlp = { version = "0.31.0", features = [
+opentelemetry-otlp = { version = "0.32.0", features = [
   "grpc-tonic",
   "http-proto",
   "trace",
