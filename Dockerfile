@@ -124,7 +124,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 #   Debian Bookworm slim + ClamAV daemon + freshclam + tini.
 #   The bundled SQLite in the Rust binary requires only glibc (already present).
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM debian:trixie AS runtime
+FROM debian:trixie-20260623 AS runtime
 
 # ── System packages ───────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
