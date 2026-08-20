@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.pnpm-store \
 #   Compute a recipe.json that captures only the dependency fingerprint.
 #   This layer is invalidated only when Cargo.toml / Cargo.lock change.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.95-slim-bookworm AS rust-planner
+FROM rust:1.98-slim-bookworm AS rust-planner
 
 RUN cargo install cargo-chef --locked
 
@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 #   Builds and caches all transitive dependencies using the recipe.
 #   libsqlite3-sys uses the "bundled" feature so no host sqlite3-dev needed.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.95 AS rust-cacher
+FROM rust:1.98 AS rust-cacher
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -69,7 +69,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 #   This stage can be skipped during development with:
 #     docker build --target backend-builder -t helm-hub-dev
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.95 AS backend-tester
+FROM rust:1.98 AS backend-tester
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -102,7 +102,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Stage 2d — Rust application build
 #   Only this layer is rebuilt when application source changes.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM rust:1.95 AS backend-builder
+FROM rust:1.98 AS backend-builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
