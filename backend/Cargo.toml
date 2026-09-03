@@ -109,7 +109,7 @@ futures-util = "0.3.32"
 metrics-util = "0.20.4"
 sodiumoxide = "0.2.7"
 blake3 = "1.8.5"
-base64 = "0.22.1"
+base64 = "0.23.0"
 
 [dev-dependencies]
 axum-test = "20.0.0"
