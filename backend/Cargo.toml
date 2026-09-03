@@ -32,7 +32,7 @@ diesel-async = { version = "0.9.0", features = ["postgres", "deadpool"] }
 deadpool = "0.13.0"
 
 # Auth
-argon2 = "0.5.3"
+argon2 = "0.6.0"
 rand_core = "0.10.1"
 rand_core_06 = { package = "rand_core", version = "0.6.4", features = ["getrandom"] }
 jsonwebtoken = { version = "10.4.0", default-features = false, features = [
